@@ -1,0 +1,8 @@
+# Project Memory
+
+- Do not run Unity Editor tests, Unity batchmode commands, or other Unity Editor startup flows unless the user explicitly asks for them in the current turn.
+- Do not add launch tasks, automations, scripts, or configuration entries that start Unity Editor for execution or verification.
+- Prefer source inspection, static checks, Android/Gradle checks that do not start Unity Editor, and user-run Pico device testing when the user asks to test manually.
+- `--stereo-mode=6` in `VLCOptions.kt` was only a temporary manual-device probe for the `FantasyJourney_3D180_LR.mp4` multichannel audio imbalance issue. It improved the symptom slightly but was not the final fix; do not re-add it globally.
+- `FantasyJourney_3D180_LR.mp4` has an `mp4a` sample entry with `channelcount=2`, but its AAC AudioSpecificConfig is `12 20` (`audioObjectType=2`, `samplingFrequencyIndex=4`, `channelConfiguration=4`). Parsed MP4 boxes do not expose `SA3D/sa3d/st3d/sv3d/proj/chnl`; treat it as unmarked but Ambisonics-like content unless later device evidence disproves that.
+- Current VLC Ambisonics-marker workaround: `vlc-android/libvlcjni/vlc/modules/demux/mp4/essetup.c` forces `AUDIO_CHANNEL_TYPE_AMBISONICS` only when the MP4 demuxer option `mp4-force-unmarked-aac4-ambisonics` is enabled and an `mp4a` sample entry reports `channelcount=2` while AAC ASC reports `channelConfiguration=4`. Android adds the media option `:mp4-force-unmarked-aac4-ambisonics` only for panoramic/180/360 playback. Device logcat markers: `Enabled unmarked AAC4 Ambisonics fallback for panoramic media` and `forcing Ambisonics channel type for unmarked 4-channel AAC track`.

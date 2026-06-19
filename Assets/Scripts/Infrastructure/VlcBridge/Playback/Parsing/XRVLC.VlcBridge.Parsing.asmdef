@@ -1,0 +1,16 @@
+{
+    "name": "XRVLC.VlcBridge.Parsing",
+    "rootNamespace": "",
+    "references": [
+        "XRVLC.Shared"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
