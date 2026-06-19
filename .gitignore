@@ -1,6 +1,9 @@
 Troubleshooting/
 
 .migration-backup/
+.claude/
+.codex/
+.vscode/
 .plastic/
 .codex-build-bin/
 
