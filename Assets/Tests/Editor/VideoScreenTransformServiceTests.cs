@@ -60,19 +60,71 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void Sphere360ProjectionIgnoresDistanceAndControllerMove()
+        public void Sphere180Projection_DistanceOffsetMovesVideoAnchorAlongReversedRadiusAtQuadrupleSpeed()
+        {
+            using var fixture = new TransformFixture();
+            float zoomDelta = 0f;
+            object service = CreateService(fixture, () => VideoProjection.Sphere180, delta => zoomDelta += delta);
+
+            Vector3 expectedAnchorPosition =
+                fixture.VideoAnchor.transform.position + fixture.VideoAnchor.transform.forward * 8f;
+
+            Invoke(service, "AddViewerDistanceOffset", 2f);
+
+            Assert.That(zoomDelta, Is.EqualTo(0f).Within(0.001f));
+            AssertVector3(new Vector3(0f, 2.5f, 15f), fixture.ScreenRoot.transform.position);
+            AssertVector3(expectedAnchorPosition, fixture.VideoAnchor.transform.position);
+        }
+
+        [Test]
+        public void Sphere180Projection_DistanceOffsetClampsPullCloserToThirtyMetersAndPushFartherToFiftyMeters()
+        {
+            using var fixture = new TransformFixture();
+            object service = CreateService(fixture, () => VideoProjection.Sphere180);
+            Vector3 startPosition = fixture.VideoAnchor.transform.position;
+            Vector3 radiusDirection = fixture.VideoAnchor.transform.forward;
+
+            Invoke(service, "AddViewerDistanceOffset", 10f);
+
+            AssertVector3(startPosition + radiusDirection * 30f, fixture.VideoAnchor.transform.position);
+
+            Invoke(service, "AddViewerDistanceOffset", -30f);
+
+            AssertVector3(startPosition - radiusDirection * 50f, fixture.VideoAnchor.transform.position);
+            AssertVector3(new Vector3(0f, 2.5f, 15f), fixture.ScreenRoot.transform.position);
+        }
+
+        [Test]
+        public void Sphere360Projection_DistanceOffsetDoesNotMoveVideoAnchor()
         {
             using var fixture = new TransformFixture();
             float zoomDelta = 0f;
             object service = CreateService(fixture, () => VideoProjection.Sphere360, delta => zoomDelta += delta);
+            Vector3 startPosition = fixture.VideoAnchor.transform.position;
 
-            Invoke(service, "AddViewerDistanceOffset", -5f);
-            Invoke(service, "BeginControllerMove", Vector3.zero);
-            Invoke(service, "UpdateControllerMove", new Vector3(0f, 0f, -5f));
+            Invoke(service, "AddViewerDistanceOffset", 2f);
 
             Assert.That(zoomDelta, Is.EqualTo(0f).Within(0.001f));
+            AssertVector3(startPosition, fixture.VideoAnchor.transform.position);
             AssertVector3(new Vector3(0f, 2.5f, 15f), fixture.ScreenRoot.transform.position);
-            AssertVector3(new Vector3(0f, 2.5f, 15f), fixture.VideoAnchor.transform.position);
+        }
+
+        [TestCase(VideoProjection.Sphere180)]
+        [TestCase(VideoProjection.Sphere360)]
+        public void ImmersiveProjection_ControllerMoveRotatesAnchorWithoutMovingCenter(VideoProjection projection)
+        {
+            using var fixture = new TransformFixture();
+            object service = CreateService(fixture, () => projection);
+
+            fixture.VideoAnchor.transform.position = fixture.Viewer.transform.position;
+            Vector3 startPosition = fixture.VideoAnchor.transform.position;
+
+            Invoke(service, "BeginControllerMove", Vector3.forward);
+            Invoke(service, "UpdateControllerMove", Vector3.right);
+
+            AssertVector3(new Vector3(0f, 2.5f, 15f), fixture.ScreenRoot.transform.position);
+            AssertVector3(startPosition, fixture.VideoAnchor.transform.position);
+            AssertVector3(Vector3.right, fixture.VideoAnchor.transform.forward);
         }
 
         [Test]

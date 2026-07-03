@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using UnityEngine;
 using XRVLC.Media;
 
@@ -11,35 +10,46 @@ namespace XRVLC
         private readonly Func<MediaWrapper> _currentMediaProvider;
         private readonly Func<bool> _hardwareDecodingProvider;
         private readonly Func<VideoGeometrySelection?> _manualGeometryProvider;
+        private readonly Func<VideoScaleMode> _scaleModeProvider;
+        private readonly Func<VideoAspectRatio> _aspectRatioProvider;
 
         public VideoScreenGeometryService(
             VideoScreen videoScreen,
             Func<MediaWrapper> currentMediaProvider,
             Func<bool> hardwareDecodingProvider,
-            Func<VideoGeometrySelection?> manualGeometryProvider = null)
+            Func<VideoGeometrySelection?> manualGeometryProvider = null,
+            Func<VideoScaleMode> scaleModeProvider = null,
+            Func<VideoAspectRatio> aspectRatioProvider = null)
         {
             _videoScreen = videoScreen;
             _currentMediaProvider = currentMediaProvider;
             _hardwareDecodingProvider = hardwareDecodingProvider;
             _manualGeometryProvider = manualGeometryProvider;
+            _scaleModeProvider = scaleModeProvider;
+            _aspectRatioProvider = aspectRatioProvider;
         }
 
         /// <summary>
-        /// 根据当前媒体信息重建视频层几何，并等待硬件 Surface 生成后绑定给 VLC。
+        /// 根据当前媒体信息重建视频层几何。VLC 绑定由 PlaybackService 统一协调。
         /// </summary>
-        public IEnumerator RebuildAndBind(uint width, uint height)
+        public void Rebuild(VlcVideoSize videoSize)
         {
             if (_videoScreen == null)
-                yield break;
+                return;
+            if (!videoSize.IsValid)
+                return;
 
             VideoGeometrySelection geometry = ResolveGeometry();
             Debug.Log($"[VideoScreenGeometryService] SetGeometry -> projection={geometry.Projection}, stereo={geometry.Stereo}, curve={geometry.CurveMode}");
+            uint contentWidth = (uint)videoSize.ContentWidth;
+            uint contentHeight = (uint)videoSize.ContentHeight;
 
-            _videoScreen.RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, width, height, geometry.Projection, geometry.Stereo, geometry.CurveMode);
+            _videoScreen.RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, contentWidth, contentHeight, geometry.Projection, geometry.Stereo, geometry.CurveMode);
             _videoScreen.SetGeometry(geometry.Projection, geometry.Stereo, geometry.CurveMode);
-            _videoScreen.FitVideoSize(width, height);
-
-            yield return WaitForSurfaceAndBind();
+            _videoScreen.SetVideoLayout(
+                _scaleModeProvider?.Invoke() ?? VideoScaleMode.Fit,
+                _aspectRatioProvider?.Invoke() ?? VideoAspectRatio.Source);
+            _videoScreen.FitVideoSize(contentWidth, contentHeight);
         }
 
         private VideoGeometrySelection ResolveGeometry()
@@ -52,30 +62,5 @@ namespace XRVLC
             return new VideoGeometrySelection(proj, stereo, FlatVideoCurveMode.None);
         }
 
-        private IEnumerator WaitForSurfaceAndBind()
-        {
-            const int maxRetries = 50;
-            int retries = 0;
-
-            while (!_videoScreen.IsHardwareSurfaceReady() && retries < maxRetries)
-            {
-                retries++;
-                if (retries % 10 == 0)
-                    Debug.Log($"[VideoScreenGeometryService] Waiting for surface... retry: {retries}/{maxRetries}");
-                yield return null;
-            }
-
-            IntPtr surfacePtr = _videoScreen.GetHardwareSurfaceHandle();
-            Debug.Log($"[VideoScreenGeometryService] Surface handle: {surfacePtr}");
-
-            if (surfacePtr == IntPtr.Zero)
-            {
-                Debug.LogError($"[VideoScreenGeometryService] 画布重建失败，超时未能获取到 Surface 指针。retries={retries}");
-                yield break;
-            }
-
-            VlcPlaybackBridge.DetachSurface();
-            VlcPlaybackBridge.SetSurface(surfacePtr);
-        }
     }
 }

@@ -38,7 +38,7 @@ public class ShortcutConfigPanel : MonoBehaviour
     private void Start()
     {
         if (saveButton != null)
-            saveButton.onClick.AddListener(Save);
+            saveButton.gameObject.SetActive(false);
         if (closeButton != null)
             closeButton.onClick.AddListener(() => gameObject.SetActive(false));
     }
@@ -48,8 +48,10 @@ public class ShortcutConfigPanel : MonoBehaviour
     /// </summary>
     private void OnDestroy()
     {
-        if (saveButton != null)
-            saveButton.onClick.RemoveListener(Save);
+        RemoveDropdownListener(leftStickClickDropdown);
+        RemoveDropdownListener(rightStickClickDropdown);
+        RemoveDropdownListener(buttonYDropdown);
+        RemoveDropdownListener(buttonBDropdown);
     }
 
     /// <summary>
@@ -106,6 +108,19 @@ public class ShortcutConfigPanel : MonoBehaviour
             new XrDropdownItemData("Toggle subtitles"),
             new XrDropdownItemData("Reset screen")
         });
+        dropdown.onValueChanged.RemoveListener(OnShortcutDropdownChanged);
+        dropdown.onValueChanged.AddListener(OnShortcutDropdownChanged);
+    }
+
+    private void RemoveDropdownListener(XrDropdown dropdown)
+    {
+        if (dropdown != null)
+            dropdown.onValueChanged.RemoveListener(OnShortcutDropdownChanged);
+    }
+
+    private void OnShortcutDropdownChanged(int _)
+    {
+        Save();
     }
 
     /// <summary>

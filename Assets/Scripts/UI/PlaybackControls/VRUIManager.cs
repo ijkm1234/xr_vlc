@@ -16,6 +16,7 @@ public class VRUIManager : MonoBehaviour
     private const string BatteryLowIcon = "battery-low";
     private const string BatteryMediumIcon = "battery-medium";
     private const string BatteryFullIcon = "battery-full";
+    private const string LoadingIconResourceName = "loading-four";
     private static readonly Color IconTint = Color.white;
     private static readonly Color TransparentListColor = new Color(1f, 1f, 1f, 0f);
     private static readonly Color HoverListColor = new Color(1f, 1f, 1f, 0.16f);
@@ -40,15 +41,20 @@ public class VRUIManager : MonoBehaviour
     private const float SystemSliderHandleSize = 27f;
     private const float SystemSliderTrackMin = 0.4f;
     private const float SystemSliderTrackMax = 0.6f;
-    private const float SystemTimeTextWidth = 96f;
-    private const float BatteryStatusTextWidth = 76f;
+    private const float LoadingOverlaySize = 160f;
+    private const float LoadingSpinnerSize = 84f;
+    private const float LoadingSpinnerDegreesPerSecond = -240f;
+    private const float LoadingDistanceFromCameraMeters = 5f;
+    private const float LoadingPanelUpOffsetMeters = 2.5f;
+    private const float LoadingWorldCanvasScale = 0.0025f;
+    private const float SystemTimeTextWidth = 68f;
     private const float SystemStatusFontSize = 26f;
-    private const float DefaultBatteryIconSize = 40f;
     private const float GeometryMenuFontSize = 22f;
     private const float geometryMenuFlatHeight = 280f;
     private const float geometryMenuPanoramicHeight = 194f;
     private const float MinWorldCanvasDynamicPixelsPerUnit = 12f;
     private const int AndroidStreamMusic = 3;
+    private const string ChooseSubtitleTrackOptionLabel = "选择其他字幕";
     private static readonly System.Collections.Generic.HashSet<string> SubtitleLanguageSuffixes =
         new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -75,10 +81,10 @@ public class VRUIManager : MonoBehaviour
     public GameObject topRightGroup;
 
     [Header("顶部信息栏")]
-    public TextMeshProUGUI titleText;
+    public XrScrollingTitleText titleScroller;
     public TextMeshProUGUI systemTimeText;
+    public Image batteryIcon;
     public TextMeshProUGUI batteryText;
-    public float batteryIconSize = DefaultBatteryIconSize;
 
     [Header("进度条区域")]
     public Slider progressSlider;
@@ -100,7 +106,7 @@ public class VRUIManager : MonoBehaviour
     public Button volumeBtn;
     public Button equalizerBtn;
     public Button subtitleBtn;
-    public Button eyeBtn;
+    public Button seeThroughBtn;
     public Button threeDBtn;
     public Button settingsBtn;
 
@@ -145,12 +151,14 @@ public class VRUIManager : MonoBehaviour
     private const float PanelVisibleDuration = 3f;
     private bool _autoHidePending = false;
     private bool _triggerWasPressed = false;
+    private float _triggerHeldSeconds = 0f;
+    private bool _triggerLongPressReleasePending = false;
 
     private float[] speedOptions = { 1.0f, 1.25f, 1.5f, 2.0f, 0.5f };
     private int currentSpeedIndex = 0;
 
-    private System.Collections.Generic.List<XRVLC.Media.TrackInfo> currentAudioTracks;
-    private System.Collections.Generic.List<XRVLC.Media.TrackInfo> currentSubtitleTracks;
+    private System.Collections.Generic.List<XRVLC.Media.TrackInfo> _openAudioTracks;
+    private System.Collections.Generic.List<XRVLC.Media.TrackInfo> _openSubtitleTracks;
     private XRVLC.VideoProjection _geometryProjection = XRVLC.VideoProjection.Flat;
     private XRVLC.StereoMode _geometryStereo = XRVLC.StereoMode.Mono;
     private XRVLC.FlatVideoCurveMode _flatCurveMode = XRVLC.FlatVideoCurveMode.None;
@@ -168,12 +176,18 @@ public class VRUIManager : MonoBehaviour
     private Coroutine _pendingTrackDropdownShow;
     private GameObject systemSliderPopup;
     private Slider systemSlider;
-    private Image batteryIcon;
+    [SerializeField] private GameObject loadingOverlay;
+    [SerializeField] private RectTransform loadingSpinnerTransform;
+    [SerializeField] private Image loadingSpinnerImage;
+    private bool isLoadingVisible;
+    private bool loadingOverlayMissingWarningShown;
+    private readonly Vector3[] loadingPanelWorldCorners = new Vector3[4];
     private SystemSliderMode _activeSystemSliderMode = SystemSliderMode.None;
     private bool _isUpdatingSystemSlider;
     private float _simulatedBrightness = 0.75f;
     private float _simulatedVolume = 0.75f;
     private float _nextSystemStatusRefreshTime;
+    private static Sprite s_GeneratedLoadingSprite;
 
     private enum SystemSliderMode
     {
@@ -191,8 +205,9 @@ public class VRUIManager : MonoBehaviour
             playbackService.OnStatusChanged += OnStatusChanged;
             playbackService.OnTimeChanged += UpdateTime;
             playbackService.OnMediaChanged += UpdateMediaInfo;
-            playbackService.OnAudioTracksChanged += UpdateAudioTracksDropdown;
-            playbackService.OnSubtitleTracksChanged += UpdateSubtitleTracksDropdown;
+            playbackService.OnBuffering += OnBuffering;
+            playbackService.OnAudioTracksChanged += HandleAudioTracksDirty;
+            playbackService.OnSubtitleTracksChanged += HandleSubtitleTracksDirty;
         }
         else
         {
@@ -227,8 +242,8 @@ public class VRUIManager : MonoBehaviour
         if (subtitleBtn != null)
             subtitleBtn.onClick.AddListener(OnSubtitleBtnClicked);
         EnsurePassthroughModeService();
-        if (eyeBtn != null)
-            eyeBtn.onClick.AddListener(OnEyeBtnClicked);
+        if (seeThroughBtn != null)
+            seeThroughBtn.onClick.AddListener(OnSeeThroughBtnClicked);
         if (threeDBtn != null)
             threeDBtn.onClick.AddListener(OnGeometryBtnClicked);
         if (settingsBtn != null)
@@ -254,9 +269,11 @@ public class VRUIManager : MonoBehaviour
             subtitleTrackDropdown.onValueChanged.AddListener(OnSubtitleTrackSelected);
 
         ApplyIconSprites();
-        UpdateEyeButtonPassthroughVisual();
+        UpdateSeeThroughButtonPassthroughVisual();
         if (playbackService != null)
             UpdatePlayButtonIcon(playbackService.CurrentStatus);
+        EnsureLoadingOverlay();
+        SetLoadingVisible(playbackService != null && IsLoadingStatus(playbackService.CurrentStatus));
         UpdateSystemStatus();
 
         RegisterUiTreeNodes();
@@ -268,10 +285,11 @@ public class VRUIManager : MonoBehaviour
         UpdateSystemStatus();
 
         HandleTriggerInput();
+        UpdateLoadingAnimation();
 
         if (_autoHidePending)
         {
-            if (IsPointerOverManagedUi())
+            if (IsPointerOverManagedUi() || IsAnySecondaryPanelOpen())
                 return;
 
             _hideTimer -= Time.deltaTime;
@@ -288,13 +306,31 @@ public class VRUIManager : MonoBehaviour
         var rightHand = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
         bool pressed = rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out bool val) && val;
 
-        if (pressed && !_triggerWasPressed)
-            HandleTriggerPressedEdge();
+        if (pressed)
+        {
+            if (!_triggerWasPressed)
+            {
+                _triggerHeldSeconds = 0f;
+                _triggerLongPressReleasePending = false;
+            }
+
+            _triggerHeldSeconds += Time.deltaTime;
+            if (_triggerHeldSeconds >= XRVLC.ShortcutInputState.TriggerFastRateHoldSeconds)
+                _triggerLongPressReleasePending = true;
+        }
+        else if (_triggerWasPressed)
+        {
+            if (!_triggerLongPressReleasePending)
+                HandleTriggerReleasedEdge();
+
+            _triggerHeldSeconds = 0f;
+            _triggerLongPressReleasePending = false;
+        }
 
         _triggerWasPressed = pressed;
     }
 
-    private void HandleTriggerPressedEdge()
+    private void HandleTriggerReleasedEdge()
     {
         bool hasCurrentUiTarget = TryGetXrUiTarget(out _);
         if (!isPanelVisible && !hasCurrentUiTarget)
@@ -305,6 +341,9 @@ public class VRUIManager : MonoBehaviour
         }
 
         if (TryHideVisiblePanelFromNonUiTrigger())
+            return;
+
+        if (TryCloseSecondaryPanelFromCurrentUiTarget())
             return;
 
         if (TryCloseSettingsMenuFromCurrentUiTarget())
@@ -339,6 +378,24 @@ public class VRUIManager : MonoBehaviour
         return true;
     }
 
+    private bool TryCloseSecondaryPanelFromCurrentUiTarget()
+    {
+        if (!IsAnySecondaryPanelOpen())
+            return false;
+
+        bool hasTarget = TryGetXrUiTarget(out GameObject target);
+        if (!hasTarget)
+            return false;
+
+        if (IsActiveSecondaryPanelObject(target))
+            return false;
+
+        Debug.Log($"[VRUIManager][SecondaryPanel] closeOutside target={DescribeUiTarget(target)}");
+        CloseSecondaryPopups();
+        RegisterUiTreeNodes();
+        return true;
+    }
+
     private bool TryConsumeCurrentUiTrigger()
     {
         RegisterUiTreeNodes();
@@ -346,7 +403,7 @@ public class VRUIManager : MonoBehaviour
         GameObject target = null;
         bool hasTarget = uiInputGate != null && uiInputGate.TryGetCurrentUiTarget(out target);
         bool consumed = uiInputGate != null &&
-            uiInputGate.TryConsumeCurrentHover(new XrUiEvent(XrUiEventType.TriggerPressed, XRNode.RightHand));
+            uiInputGate.TryConsumeCurrentHover(new XrUiEvent(XrUiEventType.TriggerReleased, XRNode.RightHand));
 
         if (anyOpenBefore || consumed)
         {
@@ -426,6 +483,63 @@ public class VRUIManager : MonoBehaviour
     private bool IsPlaylistOpen()
     {
         return playlistPanel != null && playlistPanel.IsVisible;
+    }
+
+    private bool IsAnySecondaryPanelOpen()
+    {
+        return IsAnyTrackDropdownOpen()
+            || IsSettingsMenuOpen()
+            || (geometryMenu != null && geometryMenu.activeSelf)
+            || IsSystemSliderOpen()
+            || IsPlaylistOpen()
+            || (shortcutConfigPanel != null && shortcutConfigPanel.gameObject.activeSelf);
+    }
+
+    private bool IsActiveSecondaryPanelObject(GameObject target)
+    {
+        if (target == null)
+            return false;
+
+        if (IsTrackDropdownOpen(audioTrackDropdown) &&
+            (IsDropdownObject(target, audioTrackDropdown) || IsSelfOrChildOf(target, equalizerBtn != null ? equalizerBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        if (IsTrackDropdownOpen(subtitleTrackDropdown) &&
+            (IsDropdownObject(target, subtitleTrackDropdown) || IsSelfOrChildOf(target, subtitleBtn != null ? subtitleBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        if (IsSettingsMenuOpen() &&
+            (IsSelfOrChildOf(target, settingsMenu) || IsSelfOrChildOf(target, settingsBtn != null ? settingsBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        if (geometryMenu != null && geometryMenu.activeSelf &&
+            (IsSelfOrChildOf(target, geometryMenu) || IsSelfOrChildOf(target, threeDBtn != null ? threeDBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        Button activeSystemButton = ActiveSystemSliderButton();
+        if (IsSystemSliderOpen() &&
+            (IsSelfOrChildOf(target, systemSliderPopup) || IsSelfOrChildOf(target, activeSystemButton != null ? activeSystemButton.gameObject : null)))
+        {
+            return true;
+        }
+
+        if (IsPlaylistOpen() &&
+            (IsPlaylistObject(target) || IsSelfOrChildOf(target, playlistToggleBtn != null ? playlistToggleBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        return shortcutConfigPanel != null
+            && shortcutConfigPanel.gameObject.activeSelf
+            && IsSelfOrChildOf(target, shortcutConfigPanel.gameObject);
     }
 
     private bool TryGetXrUiTarget(out GameObject target)
@@ -659,16 +773,17 @@ public class VRUIManager : MonoBehaviour
             playbackService.OnStatusChanged -= OnStatusChanged;
             playbackService.OnTimeChanged -= UpdateTime;
             playbackService.OnMediaChanged -= UpdateMediaInfo;
-            playbackService.OnAudioTracksChanged -= UpdateAudioTracksDropdown;
-            playbackService.OnSubtitleTracksChanged -= UpdateSubtitleTracksDropdown;
+            playbackService.OnBuffering -= OnBuffering;
+            playbackService.OnAudioTracksChanged -= HandleAudioTracksDirty;
+            playbackService.OnSubtitleTracksChanged -= HandleSubtitleTracksDirty;
         }
 
         if (settingsBtn != null)
             settingsBtn.onClick.RemoveListener(OnSettingsBtnClicked);
         if (threeDBtn != null)
             threeDBtn.onClick.RemoveListener(OnGeometryBtnClicked);
-        if (eyeBtn != null)
-            eyeBtn.onClick.RemoveListener(OnEyeBtnClicked);
+        if (seeThroughBtn != null)
+            seeThroughBtn.onClick.RemoveListener(OnSeeThroughBtnClicked);
         if (brightnessBtn != null)
             brightnessBtn.onClick.RemoveListener(OnBrightnessBtnClicked);
         if (volumeBtn != null)
@@ -682,8 +797,263 @@ public class VRUIManager : MonoBehaviour
     private void OnStatusChanged(XRVLC.Media.PlayerStatus status)
     {
         UpdatePlayButtonIcon(status);
+        SetLoadingVisible(IsLoadingStatus(status));
         if (status == XRVLC.Media.PlayerStatus.Playing && isPanelVisible)
             SchedulePanelHide();
+    }
+
+    private void OnBuffering(float buffering)
+    {
+        SetLoadingVisible(buffering < 100f);
+    }
+
+    private static bool IsLoadingStatus(XRVLC.Media.PlayerStatus status)
+    {
+        return status == XRVLC.Media.PlayerStatus.Opening
+            || status == XRVLC.Media.PlayerStatus.Buffering;
+    }
+
+    private void EnsureLoadingOverlay()
+    {
+        ResolveLoadingOverlayReferences();
+        if (loadingOverlay == null)
+        {
+            if (!loadingOverlayMissingWarningShown)
+            {
+                Debug.LogWarning("[VRUIManager] LoadingOverlay is not assigned. Create it in the scene and wire it to VRUIManager.");
+                loadingOverlayMissingWarningShown = true;
+            }
+            return;
+        }
+
+        Canvas canvas = loadingOverlay.GetComponent<Canvas>();
+        if (canvas != null)
+        {
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = PopupSortingOrder + 1;
+            canvas.worldCamera = GetLoadingCamera();
+        }
+
+        CanvasScaler canvasScaler = loadingOverlay.GetComponent<CanvasScaler>();
+        if (canvasScaler != null)
+            canvasScaler.dynamicPixelsPerUnit = MinWorldCanvasDynamicPixelsPerUnit;
+
+        CanvasGroup canvasGroup = loadingOverlay.GetComponent<CanvasGroup>();
+        if (canvasGroup != null)
+        {
+            canvasGroup.alpha = 1f;
+            canvasGroup.interactable = false;
+            canvasGroup.blocksRaycasts = false;
+        }
+
+        RectTransform overlayRect = loadingOverlay.GetComponent<RectTransform>();
+        if (overlayRect != null)
+        {
+            overlayRect.sizeDelta = new Vector2(LoadingOverlaySize, LoadingOverlaySize);
+            overlayRect.localScale = Vector3.one * LoadingWorldCanvasScale;
+        }
+
+        if (loadingSpinnerTransform != null)
+            loadingSpinnerTransform.sizeDelta = new Vector2(LoadingSpinnerSize, LoadingSpinnerSize);
+
+        if (loadingSpinnerImage != null)
+        {
+            if (loadingSpinnerImage.sprite == null)
+                loadingSpinnerImage.sprite = LoadLoadingSprite();
+            loadingSpinnerImage.color = IconTint;
+            loadingSpinnerImage.preserveAspect = true;
+            loadingSpinnerImage.raycastTarget = false;
+        }
+    }
+
+    private void ResolveLoadingOverlayReferences()
+    {
+        if (loadingOverlay == null)
+        {
+            Transform sceneOverlay = transform.root.Find("LoadingOverlay");
+            if (sceneOverlay == null)
+                sceneOverlay = FindSceneLoadingOverlay();
+
+            if (sceneOverlay != null)
+                loadingOverlay = sceneOverlay.gameObject;
+        }
+
+        if (loadingOverlay == null)
+            return;
+
+        if (loadingSpinnerTransform == null)
+        {
+            Transform spinner = loadingOverlay.transform.Find("LoadingSpinner");
+            loadingSpinnerTransform = spinner as RectTransform;
+        }
+
+        if (loadingSpinnerImage == null && loadingSpinnerTransform != null)
+            loadingSpinnerImage = loadingSpinnerTransform.GetComponent<Image>();
+    }
+
+    private static Transform FindSceneLoadingOverlay()
+    {
+        Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+        foreach (Transform candidate in transforms)
+        {
+            if (candidate == null || candidate.name != "LoadingOverlay")
+                continue;
+            if (!candidate.gameObject.scene.IsValid())
+                continue;
+            return candidate;
+        }
+
+        return null;
+    }
+
+    private void SetLoadingVisible(bool visible)
+    {
+        EnsureLoadingOverlay();
+        isLoadingVisible = visible;
+
+        if (loadingOverlay == null)
+            return;
+
+        if (visible)
+        {
+            loadingOverlay.transform.SetAsLastSibling();
+            UpdateLoadingOverlayPose();
+        }
+        if (loadingOverlay.activeSelf != visible)
+            loadingOverlay.SetActive(visible);
+    }
+
+    private void UpdateLoadingAnimation()
+    {
+        if (!isLoadingVisible)
+            return;
+
+        EnsureLoadingOverlay();
+        UpdateLoadingOverlayPose();
+        if (loadingSpinnerTransform != null)
+            loadingSpinnerTransform.Rotate(0f, 0f, LoadingSpinnerDegreesPerSecond * Time.unscaledDeltaTime);
+    }
+
+    private void UpdateLoadingOverlayPose()
+    {
+        if (loadingOverlay == null)
+            return;
+
+        Camera loadingCamera = GetLoadingCamera();
+        if (loadingCamera == null)
+            return;
+
+        Canvas canvas = loadingOverlay.GetComponent<Canvas>();
+        if (canvas != null)
+            canvas.worldCamera = loadingCamera;
+
+        Transform cameraTransform = loadingCamera.transform;
+        Vector3 panelUp = cameraTransform.up;
+        Vector3 panelCenter = cameraTransform.position + cameraTransform.forward;
+        if (GetControlPanelWorldCenter(out Vector3 controlPanelCenter, out Vector3 controlPanelUp))
+        {
+            panelCenter = controlPanelCenter;
+            panelUp = controlPanelUp;
+        }
+
+        Vector3 direction = panelCenter - cameraTransform.position;
+        if (direction.sqrMagnitude < 0.0001f)
+            direction = cameraTransform.forward;
+        direction.Normalize();
+
+        loadingOverlay.transform.position =
+            cameraTransform.position + direction * LoadingDistanceFromCameraMeters + panelUp * LoadingPanelUpOffsetMeters;
+        loadingOverlay.transform.LookAt(cameraTransform.position);
+    }
+
+    private bool GetControlPanelWorldCenter(out Vector3 center, out Vector3 panelUp)
+    {
+        center = Vector3.zero;
+        panelUp = Vector3.up;
+
+        RectTransform controlPanelRect = controlPanel != null ? controlPanel.GetComponent<RectTransform>() : null;
+        if (controlPanelRect == null)
+            return false;
+
+        controlPanelRect.GetWorldCorners(loadingPanelWorldCorners);
+        center = (loadingPanelWorldCorners[0]
+                  + loadingPanelWorldCorners[1]
+                  + loadingPanelWorldCorners[2]
+                  + loadingPanelWorldCorners[3]) * 0.25f;
+
+        panelUp = controlPanelRect.up.sqrMagnitude > 0.0001f
+            ? controlPanelRect.up.normalized
+            : Vector3.up;
+        return true;
+    }
+
+    private Camera GetLoadingCamera()
+    {
+        if (Camera.main != null)
+            return Camera.main;
+
+        Canvas parentCanvas = controlPanel != null
+            ? controlPanel.GetComponentInParent<Canvas>(true)
+            : GetComponentInParent<Canvas>(true);
+        return parentCanvas != null ? parentCanvas.worldCamera : null;
+    }
+
+    private static Sprite LoadLoadingSprite()
+    {
+        Sprite sprite = Resources.Load<Sprite>(IconResourcePath + LoadingIconResourceName);
+        if (sprite != null)
+            return sprite;
+
+        return CreateGeneratedLoadingSpinnerSprite();
+    }
+
+    private static Sprite CreateGeneratedLoadingSpinnerSprite()
+    {
+        if (s_GeneratedLoadingSprite != null)
+            return s_GeneratedLoadingSprite;
+
+        const int textureSize = 96;
+        const float radius = 38f;
+        const float halfStrokeWidth = 4f;
+        const float gapDegrees = 72f;
+
+        Texture2D texture = new Texture2D(textureSize, textureSize, TextureFormat.RGBA32, false);
+        texture.name = "GeneratedLoadingSpinnerTexture";
+        texture.wrapMode = TextureWrapMode.Clamp;
+        texture.filterMode = FilterMode.Bilinear;
+
+        Color32[] pixels = new Color32[textureSize * textureSize];
+        Color32 white = new Color32(255, 255, 255, 255);
+        Vector2 center = new Vector2((textureSize - 1) * 0.5f, (textureSize - 1) * 0.5f);
+
+        for (int y = 0; y < textureSize; y++)
+        {
+            for (int x = 0; x < textureSize; x++)
+            {
+                float dx = x - center.x;
+                float dy = y - center.y;
+                float distance = Mathf.Sqrt(dx * dx + dy * dy);
+                if (distance < radius - halfStrokeWidth || distance > radius + halfStrokeWidth)
+                    continue;
+
+                float angle = Mathf.Repeat(Mathf.Atan2(dy, dx) * Mathf.Rad2Deg + 360f, 360f);
+                if (angle < gapDegrees)
+                    continue;
+
+                pixels[y * textureSize + x] = white;
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, true);
+
+        s_GeneratedLoadingSprite = Sprite.Create(
+            texture,
+            new Rect(0f, 0f, textureSize, textureSize),
+            new Vector2(0.5f, 0.5f),
+            textureSize);
+        s_GeneratedLoadingSprite.name = "GeneratedLoadingSpinnerSprite";
+        return s_GeneratedLoadingSprite;
     }
 
     private void SetPanelVisibility(bool isVisible)
@@ -714,6 +1084,8 @@ public class VRUIManager : MonoBehaviour
     private void OnAudioTrackBtnClicked()
     {
         if (audioTrackDropdown == null) return;
+        if (!IsTrackDropdownOpen(audioTrackDropdown))
+            RefreshAudioTracksDropdownFromVlc();
         bool show = ShouldShowTrackDropdown(audioTrackDropdown);
         LogTrackDropdownClick("audio", audioTrackDropdown, show);
         CloseSecondaryPopups(show ? audioTrackDropdown.gameObject : null);
@@ -724,6 +1096,8 @@ public class VRUIManager : MonoBehaviour
     private void OnSubtitleBtnClicked()
     {
         if (subtitleTrackDropdown == null) return;
+        if (!IsTrackDropdownOpen(subtitleTrackDropdown))
+            RefreshSubtitleTracksDropdownFromVlc();
         bool show = ShouldShowTrackDropdown(subtitleTrackDropdown);
         LogTrackDropdownClick("subtitle", subtitleTrackDropdown, show);
         CloseSecondaryPopups(show ? subtitleTrackDropdown.gameObject : null);
@@ -845,12 +1219,12 @@ public class VRUIManager : MonoBehaviour
             systemSliderPopup.SetActive(false);
     }
 
-    private void OnEyeBtnClicked()
+    private void OnSeeThroughBtnClicked()
     {
         CloseSecondaryPopups();
         EnsurePassthroughModeService();
         passthroughModeService?.Toggle();
-        UpdateEyeButtonPassthroughVisual();
+        UpdateSeeThroughButtonPassthroughVisual();
     }
 
     private void EnsurePassthroughModeService()
@@ -867,22 +1241,41 @@ public class VRUIManager : MonoBehaviour
 
     private void OnPassthroughStateChanged(bool enabled)
     {
-        UpdateEyeButtonPassthroughVisual();
+        ApplyPassthroughBackground(enabled);
+        UpdateSeeThroughButtonPassthroughVisual();
     }
 
-    private void UpdateEyeButtonPassthroughVisual()
+    private void UpdateSeeThroughButtonPassthroughVisual()
     {
         bool isEnabled = passthroughModeService != null && passthroughModeService.IsEnabled;
         bool isSupported = passthroughModeService == null || passthroughModeService.IsSupported;
-        SetEyeButtonPassthroughVisual(isEnabled, isSupported);
+        ApplyPassthroughBackground(isEnabled && isSupported);
+        SetSeeThroughButtonPassthroughVisual(isEnabled, isSupported);
     }
 
-    private void SetEyeButtonPassthroughVisual(bool enabled, bool supported)
+    private void ApplyPassthroughBackground(bool enabled)
     {
-        if (eyeBtn == null) return;
+        XRVLC.VideoScreen videoScreen = ResolveVideoScreen();
+        videoScreen?.SetPassthroughBackgroundEnabled(enabled);
+    }
 
-        eyeBtn.interactable = supported;
-        Image image = eyeBtn.GetComponent<Image>();
+    private XRVLC.VideoScreen ResolveVideoScreen()
+    {
+        if (playbackService == null)
+            playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        if (playbackService != null && playbackService.videoScreen != null)
+            return playbackService.videoScreen;
+
+        return FindAnyObjectByType<XRVLC.VideoScreen>();
+    }
+
+    private void SetSeeThroughButtonPassthroughVisual(bool enabled, bool supported)
+    {
+        if (seeThroughBtn == null) return;
+
+        seeThroughBtn.interactable = supported;
+        Image image = seeThroughBtn.GetComponent<Image>();
         if (image == null) return;
 
         if (!supported)
@@ -891,7 +1284,7 @@ public class VRUIManager : MonoBehaviour
             return;
         }
 
-        ApplyRuntimeButtonTheme(eyeBtn, image, enabled);
+        ApplyRuntimeButtonTheme(seeThroughBtn, image, enabled);
     }
 
     /// <summary>
@@ -1674,7 +2067,7 @@ public class VRUIManager : MonoBehaviour
         SetButtonIcon(volumeBtn, "volume", 32f);
         SetButtonIcon(equalizerBtn, "equalizer", 32f);
         SetButtonIcon(subtitleBtn, "subtitle", 32f);
-        SetButtonIcon(eyeBtn, "view", 32f);
+        SetButtonIcon(seeThroughBtn, "sphere", 32f);
         SetButtonIcon(threeDBtn, "stereo3d", 32f);
         SetButtonIcon(settingsBtn, "settings", 32f);
     }
@@ -1796,11 +2189,8 @@ public class VRUIManager : MonoBehaviour
     {
         if (media == null) return;
 
-        if (titleText != null)
-        {
-            titleText.enabled = true;
-            titleText.text = GetDisplayTitle(media);
-        }
+        if (titleScroller != null)
+            titleScroller.SetText(GetDisplayTitle(media));
 
         SetLocalGeometrySelectionFromMedia(media);
     }
@@ -1881,9 +2271,7 @@ public class VRUIManager : MonoBehaviour
     private void EnsureRuntimeTextVisible()
     {
         ConfigureSystemStatusLayout();
-        EnsureBatteryIcon();
 
-        if (titleText != null) titleText.enabled = true;
         if (systemTimeText != null) systemTimeText.enabled = true;
         if (batteryText != null) batteryText.enabled = true;
         if (currentTimeText != null) currentTimeText.enabled = true;
@@ -1894,8 +2282,6 @@ public class VRUIManager : MonoBehaviour
     private void ConfigureSystemStatusLayout()
     {
         ConfigureFixedSystemStatusText(systemTimeText, SystemTimeTextWidth);
-        ConfigureFixedSystemStatusText(batteryText, BatteryStatusTextWidth);
-        EnsureBatteryIconParentLayout();
     }
 
     private static void ConfigureFixedSystemStatusText(TextMeshProUGUI text, float width)
@@ -1922,75 +2308,6 @@ public class VRUIManager : MonoBehaviour
         layout.flexibleWidth = 0f;
     }
 
-    private void EnsureBatteryIconParentLayout()
-    {
-        if (batteryText == null || batteryText.transform.parent == null)
-            return;
-
-        HorizontalLayoutGroup layout = batteryText.transform.parent.GetComponent<HorizontalLayoutGroup>();
-        if (layout == null)
-            return;
-
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = false;
-        layout.childForceExpandHeight = false;
-        layout.childAlignment = TextAnchor.MiddleRight;
-    }
-
-    private void EnsureBatteryIcon()
-    {
-        if (batteryText == null)
-            return;
-
-        Transform parent = batteryText.transform.parent;
-        if (parent == null)
-            return;
-
-        if (batteryIcon == null)
-        {
-            Transform existing = parent.Find("BatteryIcon");
-            if (existing != null)
-                batteryIcon = existing.GetComponent<Image>();
-        }
-
-        if (batteryIcon == null)
-        {
-            var iconObject = new GameObject("BatteryIcon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(LayoutElement));
-            iconObject.transform.SetParent(parent, false);
-            iconObject.transform.SetSiblingIndex(batteryText.transform.GetSiblingIndex());
-            batteryIcon = iconObject.GetComponent<Image>();
-        }
-
-        SetBatteryIconSprite(-1);
-        batteryIcon.gameObject.SetActive(true);
-        batteryIcon.enabled = true;
-        batteryIcon.color = IconTint;
-        batteryIcon.preserveAspect = true;
-        batteryIcon.raycastTarget = false;
-
-        RectTransform rect = batteryIcon.GetComponent<RectTransform>();
-        if (rect != null)
-        {
-            float size = Mathf.Max(1f, batteryIconSize);
-            rect.sizeDelta = new Vector2(size, size);
-            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size);
-            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size);
-        }
-
-        LayoutElement layout = batteryIcon.GetComponent<LayoutElement>();
-        if (layout != null)
-        {
-            float size = Mathf.Max(1f, batteryIconSize);
-            layout.minWidth = size;
-            layout.minHeight = size;
-            layout.preferredWidth = size;
-            layout.preferredHeight = size;
-            layout.flexibleWidth = 0f;
-            layout.flexibleHeight = 0f;
-        }
-    }
-
     private void UpdateSystemStatus()
     {
         if (systemTimeText != null)
@@ -2004,7 +2321,8 @@ public class VRUIManager : MonoBehaviour
             return;
 
         int batteryPercent = ReadBatteryPercent();
-        batteryText.text = batteryPercent >= 0 ? $"{batteryPercent}%" : "--%";
+        string batteryLabel = batteryPercent >= 0 ? batteryPercent.ToString() : "--";
+        batteryText.text = batteryLabel;
         SetBatteryIconSprite(batteryPercent);
     }
 
@@ -2177,45 +2495,69 @@ public class VRUIManager : MonoBehaviour
     }
 #endif
 
+    private void HandleAudioTracksDirty(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
+    {
+        if (IsTrackDropdownOpen(audioTrackDropdown))
+            RefreshAudioTracksDropdownFromVlc();
+    }
+
+    private void HandleSubtitleTracksDirty(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
+    {
+        if (IsTrackDropdownOpen(subtitleTrackDropdown))
+            RefreshSubtitleTracksDropdownFromVlc();
+    }
+
+    private void RefreshAudioTracksDropdownFromVlc()
+    {
+        XRVLC.Media.TrackSnapshot snapshot = playbackService != null
+            ? playbackService.GetAudioTrackSnapshotFromVlc()
+            : new XRVLC.Media.TrackSnapshot();
+        UpdateAudioTracksDropdown(snapshot.AudioTracks);
+    }
+
+    private void RefreshSubtitleTracksDropdownFromVlc()
+    {
+        XRVLC.Media.TrackSnapshot snapshot = playbackService != null
+            ? playbackService.GetSubtitleTrackSnapshotFromVlc()
+            : new XRVLC.Media.TrackSnapshot();
+        UpdateSubtitleTracksDropdown(snapshot.SubtitleTracks);
+    }
+
     private void UpdateAudioTracksDropdown(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
     {
-        currentAudioTracks = tracks;
+        _openAudioTracks = tracks ?? new System.Collections.Generic.List<XRVLC.Media.TrackInfo>();
         if (audioTrackDropdown == null) return;
-        if (tracks == null || tracks.Count == 0)
+        if (_openAudioTracks.Count == 0)
         {
             audioTrackDropdown.SetPlaceholder("无音轨");
             return;
         }
         audioTrackDropdown.SetInteractable(true);
         var options = new System.Collections.Generic.List<XrDropdownItemData>();
-        int selectedIndex = ResolveSelectedTrackIndex(tracks, playbackService?.CurrentMedia?.AudioTrack, true);
-        for (int i = 0; i < tracks.Count; i++)
+        int selectedIndex = ResolveSelectedTrackIndex(_openAudioTracks, true);
+        for (int i = 0; i < _openAudioTracks.Count; i++)
         {
-            options.Add(new XrDropdownItemData(tracks[i].Name));
+            options.Add(new XrDropdownItemData(_openAudioTracks[i].Name));
         }
         audioTrackDropdown.SetItems(options, selectedIndex);
     }
 
     private void UpdateSubtitleTracksDropdown(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
     {
-        currentSubtitleTracks = tracks;
+        _openSubtitleTracks = tracks ?? new System.Collections.Generic.List<XRVLC.Media.TrackInfo>();
         if (subtitleTrackDropdown == null) return;
-        if (tracks == null || tracks.Count == 0)
-        {
-            subtitleTrackDropdown.SetPlaceholder("无字幕");
-            return;
-        }
         subtitleTrackDropdown.SetInteractable(true);
         var options = new System.Collections.Generic.List<XrDropdownItemData>();
-        int selectedIndex = ResolveSelectedTrackIndex(tracks, playbackService?.CurrentMedia?.SpuTrack, false);
-        for (int i = 0; i < tracks.Count; i++)
+        int selectedIndex = _openSubtitleTracks.Count > 0 ? ResolveSelectedTrackIndex(_openSubtitleTracks, false) + 1 : 0;
+        options.Add(new XrDropdownItemData(ChooseSubtitleTrackOptionLabel, showBottomSeparator: true));
+        for (int i = 0; i < _openSubtitleTracks.Count; i++)
         {
-            options.Add(new XrDropdownItemData(GetSubtitleTrackDisplayNameForMedia(tracks[i], playbackService?.CurrentMedia)));
+            options.Add(new XrDropdownItemData(GetSubtitleTrackDisplayNameForMedia(_openSubtitleTracks[i], playbackService?.CurrentMedia)));
         }
         subtitleTrackDropdown.SetItems(options, selectedIndex);
     }
 
-    private static int ResolveSelectedTrackIndex(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks, string currentTrackId, bool preferFirstEnabledWhenDisabled)
+    private static int ResolveSelectedTrackIndex(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks, bool preferFirstEnabledWhenDisabled)
     {
         if (tracks == null || tracks.Count == 0)
             return 0;
@@ -2223,13 +2565,6 @@ public class VRUIManager : MonoBehaviour
         for (int i = 0; i < tracks.Count; i++)
             if (tracks[i].IsSelected)
                 return i;
-
-        if (!string.IsNullOrEmpty(currentTrackId))
-        {
-            for (int i = 0; i < tracks.Count; i++)
-                if (tracks[i].Id == currentTrackId)
-                    return i;
-        }
 
         if (preferFirstEnabledWhenDisabled)
         {
@@ -2387,14 +2722,30 @@ public class VRUIManager : MonoBehaviour
 
     private void OnAudioTrackSelected(int dropdownIndex)
     {
-        if (currentAudioTracks != null && dropdownIndex >= 0 && dropdownIndex < currentAudioTracks.Count)
-            playbackService?.SetAudioTrack(currentAudioTracks[dropdownIndex].Id);
+        if (_openAudioTracks != null && dropdownIndex >= 0 && dropdownIndex < _openAudioTracks.Count)
+        {
+            XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetAudioTrack(_openAudioTracks[dropdownIndex].Id)
+                ?? new XRVLC.Media.TrackSnapshot();
+            UpdateAudioTracksDropdown(snapshot.AudioTracks);
+        }
     }
 
     private void OnSubtitleTrackSelected(int dropdownIndex)
     {
-        if (currentSubtitleTracks != null && dropdownIndex >= 0 && dropdownIndex < currentSubtitleTracks.Count)
-            playbackService?.SetSubtitleTrack(currentSubtitleTracks[dropdownIndex].Id);
+        if (dropdownIndex == 0)
+        {
+            CloseSecondaryPopups();
+            VlcPlaybackBridge.OpenSubtitlePicker();
+            return;
+        }
+
+        int trackIndex = dropdownIndex - 1;
+        if (_openSubtitleTracks != null && trackIndex >= 0 && trackIndex < _openSubtitleTracks.Count)
+        {
+            XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetSubtitleTrack(_openSubtitleTracks[trackIndex].Id)
+                ?? new XRVLC.Media.TrackSnapshot();
+            UpdateSubtitleTracksDropdown(snapshot.SubtitleTracks);
+        }
     }
 
     public void OnPreviousBtnClicked()

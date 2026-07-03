@@ -6,7 +6,7 @@ public static class VlcPlaybackEvents
 {
     public static VlcPlaybackSnapshot Snapshot => VlcPlaybackBridge.Snapshot;
 
-    public static event Action<int, int> OnVideoSizeChanged
+    public static event Action<VlcVideoSize> OnVideoSizeChanged
     {
         add => VlcPlaybackBridge.OnVideoSizeChangedEvent += value;
         remove => VlcPlaybackBridge.OnVideoSizeChangedEvent -= value;
@@ -30,10 +30,22 @@ public static class VlcPlaybackEvents
         remove => VlcPlaybackBridge.OnLengthChangedEvent -= value;
     }
 
+    public static event Action<float> OnPlaybackRateChanged
+    {
+        add => VlcPlaybackBridge.OnPlaybackRateChangedEvent += value;
+        remove => VlcPlaybackBridge.OnPlaybackRateChangedEvent -= value;
+    }
+
     public static event Action<float> OnBuffering
     {
         add => VlcPlaybackBridge.OnBufferingEvent += value;
         remove => VlcPlaybackBridge.OnBufferingEvent -= value;
+    }
+
+    public static event Action OnClearPlaybackSurface
+    {
+        add => VlcPlaybackBridge.ClearPlaybackSurfaceEvent += value;
+        remove => VlcPlaybackBridge.ClearPlaybackSurfaceEvent -= value;
     }
 
     public static event Action<List<TrackInfo>> OnAudioTracksChanged
@@ -46,12 +58,6 @@ public static class VlcPlaybackEvents
     {
         add => VlcPlaybackBridge.OnSubtitleTracksChangedEvent += value;
         remove => VlcPlaybackBridge.OnSubtitleTracksChangedEvent -= value;
-    }
-
-    public static event Action<SubtitleCue> OnSubtitleCue
-    {
-        add => VlcPlaybackBridge.OnSubtitleCueEvent += value;
-        remove => VlcPlaybackBridge.OnSubtitleCueEvent -= value;
     }
 
     public static event Action<MediaWrapper> OnPlayRequested

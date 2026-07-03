@@ -41,6 +41,12 @@ namespace XRVLC.Services.Shortcuts
                 case ShortcutCommandType.SeekForward:
                     _playbackService.SeekRelativeSeconds(_seekSeconds);
                     break;
+                case ShortcutCommandType.SeekBackward30Seconds:
+                    _playbackService.SeekRelativeSeconds(-30);
+                    break;
+                case ShortcutCommandType.SeekForward30Seconds:
+                    _playbackService.SeekRelativeSeconds(30);
+                    break;
                 case ShortcutCommandType.TogglePlayPause:
                     _playbackService.TogglePlayPause();
                     break;

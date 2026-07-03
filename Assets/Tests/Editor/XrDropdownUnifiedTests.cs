@@ -35,6 +35,25 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void SharedDropdownPrefab_KeepsCaptionBackgroundTransparent()
+        {
+            string prefab = File.ReadAllText(ProjectFile("Assets/Prefabs/UI/XrDropdown.prefab"));
+
+            int captionIndex = prefab.IndexOf("m_Name: Caption", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(captionIndex, 0, "XrDropdown prefab should contain a Caption child.");
+            int popupIndex = prefab.IndexOf("m_Name: Popup", captionIndex, System.StringComparison.Ordinal);
+            Assert.Greater(popupIndex, captionIndex, "Caption block should appear before Popup.");
+
+            string captionBlock = prefab.Substring(captionIndex, popupIndex - captionIndex);
+            StringAssert.Contains("m_Color: {r: 0.04, g: 0.04, b: 0.04, a: 0}", captionBlock);
+            StringAssert.Contains("m_RaycastTarget: 1", captionBlock);
+            StringAssert.Contains("m_Transition: 0", captionBlock);
+            StringAssert.Contains("m_TargetGraphic: {fileID: 100013}", captionBlock);
+            StringAssert.DoesNotContain("a: 0.16", captionBlock);
+            StringAssert.DoesNotContain("a: 0.24", captionBlock);
+        }
+
+        [Test]
         public void DropdownLogic_ComputesRowHeightFromFontSizeAndPadding()
         {
             string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
@@ -44,6 +63,32 @@ namespace XRVLC.Tests
             StringAssert.Contains("Mathf.Min(_items.Count, maxVisibleItems) * RowHeight", source);
             StringAssert.Contains("CommonUsages.primary2DAxis", source);
             StringAssert.Contains("verticalNormalizedPosition", source);
+        }
+
+        [Test]
+        public void DropdownTextStyleDisablesTmpUnderlay()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
+
+            StringAssert.Contains("DisableTextUnderlay(text)", source);
+            StringAssert.Contains("_UnderlayColor", source);
+            StringAssert.Contains("text.fontMaterial", source);
+            StringAssert.Contains("underlay.a = 0f", source);
+        }
+
+        [Test]
+        public void DropdownKeepsCaptionVisibleAndPlacesPopupBelowIt()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
+
+            StringAssert.DoesNotContain("hideCaptionWhenOpen", source);
+            StringAssert.DoesNotContain("popupOverCaption", source);
+            StringAssert.Contains("captionButton.gameObject.SetActive(showCaption)", source);
+            StringAssert.Contains("popupRect.anchorMin = showCaption ? new Vector2(0f, 0f) : Vector2.zero", source);
+            StringAssert.Contains("popupRect.anchorMax = showCaption ? new Vector2(1f, 0f) : Vector2.one", source);
+            StringAssert.Contains("popupRect.anchoredPosition = Vector2.zero", source);
+            StringAssert.Contains("RefreshRows();\n        ResetCaptionGraphicState();", source);
+            StringAssert.Contains("ApplyLayout();\n        ResetOpenCanvasPriority();", source);
         }
 
         [Test]

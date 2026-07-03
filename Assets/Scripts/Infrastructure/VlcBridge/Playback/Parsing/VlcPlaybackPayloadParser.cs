@@ -39,25 +39,32 @@ public static class VlcPlaybackPayloadParser
         return list;
     }
 
+    public static TrackSnapshot ParseTrackSnapshot(string data)
+    {
+        var snapshot = new TrackSnapshot();
+        if (string.IsNullOrEmpty(data)) return snapshot;
+
+        try
+        {
+            TrackSnapshotPayload payload = JsonUtility.FromJson<TrackSnapshotPayload>(data);
+            AddTracks(snapshot.AudioTracks, payload?.audioTracks);
+            AddTracks(snapshot.SubtitleTracks, payload?.subtitleTracks);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[VlcPlaybackPayloadParser] Failed to parse track snapshot JSON payload: {ex.Message}");
+        }
+
+        return snapshot;
+    }
+
     private static List<TrackInfo> ParseTracksJsonData(string data)
     {
         var list = new List<TrackInfo>();
         try
         {
             TrackListPayload payload = JsonUtility.FromJson<TrackListPayload>(data);
-            if (payload?.tracks == null) return list;
-
-            foreach (TrackPayload track in payload.tracks)
-            {
-                if (track == null || string.IsNullOrEmpty(track.id)) continue;
-                list.Add(new TrackInfo
-                {
-                    Id = track.id,
-                    Name = track.name,
-                    IsSelected = track.selected,
-                    Slave = track.slave
-                });
-            }
+            AddTracks(list, payload?.tracks);
         }
         catch (Exception ex)
         {
@@ -67,10 +74,34 @@ public static class VlcPlaybackPayloadParser
         return list;
     }
 
+    private static void AddTracks(List<TrackInfo> target, TrackPayload[] tracks)
+    {
+        if (target == null || tracks == null) return;
+
+        foreach (TrackPayload track in tracks)
+        {
+            if (track == null || string.IsNullOrEmpty(track.id)) continue;
+            target.Add(new TrackInfo
+            {
+                Id = track.id,
+                Name = track.name,
+                IsSelected = track.selected,
+                Slave = track.slave
+            });
+        }
+    }
+
     [Serializable]
     private class TrackListPayload
     {
         public TrackPayload[] tracks;
+    }
+
+    [Serializable]
+    private class TrackSnapshotPayload
+    {
+        public TrackPayload[] audioTracks;
+        public TrackPayload[] subtitleTracks;
     }
 
     [Serializable]
@@ -85,7 +116,7 @@ public static class VlcPlaybackPayloadParser
     /// <summary>
     /// 解析 Android 侧 StartPlay JSON，并构建 Unity 播放领域模型。
     /// </summary>
-    public static MediaWrapper ParseStartPlayPayload(string jsonPayload, Func<string, long> lastTimeProvider)
+    public static MediaWrapper ParseStartPlayPayload(string jsonPayload)
     {
         if (string.IsNullOrEmpty(jsonPayload)) return null;
 
@@ -94,22 +125,30 @@ public static class VlcPlaybackPayloadParser
 
         string normalizedUri = DecodeBridgeUri(dto.uri);
         dto.uri = normalizedUri;
-        string title = string.IsNullOrEmpty(dto.title) ? "未知视频" : dto.title;
-        long lastTime = dto.time > 0 ? dto.time : lastTimeProvider?.Invoke(normalizedUri) ?? 0;
+        string title = BuildTitleFromUri(normalizedUri);
 
         return new MediaWrapper
         {
             Id = normalizedUri,
             Uri = normalizedUri,
             Title = title,
-            Time = lastTime,
-            FromStart = dto.fromStart,
-            PositionInList = dto.positionInList,
-            Slaves = dto.slaves ?? new List<SlaveDTO>(),
-            Projection = ParseProjectionType(dto.projection),
-            StereoHint = dto.stereo,
+            Time = 0,
+            FromStart = false,
+            PositionInList = dto.index,
+            Slaves = new List<SlaveDTO>(),
+            Projection = MediaProjectionType.Flat2D,
+            StereoHint = null,
             RawJson = jsonPayload
         };
+    }
+
+    private static string BuildTitleFromUri(string uri)
+    {
+        if (string.IsNullOrEmpty(uri)) return "未知视频";
+
+        int slash = Math.Max(uri.LastIndexOf('/'), uri.LastIndexOf('\\'));
+        string title = slash >= 0 && slash + 1 < uri.Length ? uri.Substring(slash + 1) : uri;
+        return string.IsNullOrEmpty(title) ? "未知视频" : title;
     }
 
     private static string DecodeBridgeUri(string uri)
@@ -132,28 +171,6 @@ public static class VlcPlaybackPayloadParser
     public static VlcMediaParseResult ParseMediaParseResult(string json)
     {
         return JsonUtility.FromJson<VlcMediaParseResult>(json);
-    }
-
-    /// <summary>
-    /// 解析 Android/native 侧截流出来的播放时字幕 cue。
-    /// </summary>
-    public static SubtitleCue ParseSubtitleCuePayload(string json)
-    {
-        if (string.IsNullOrEmpty(json)) return SubtitleCue.Clear();
-
-        try
-        {
-            SubtitleCue cue = JsonUtility.FromJson<SubtitleCue>(json);
-            if (cue == null) return SubtitleCue.Clear();
-
-            cue.Normalize();
-            return cue;
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[VlcPlaybackPayloadParser] ParseSubtitleCuePayload failed: {e.Message}");
-            return SubtitleCue.Clear();
-        }
     }
 
     private static MediaProjectionType ParseProjectionType(string value) => value switch

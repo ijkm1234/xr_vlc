@@ -60,6 +60,7 @@ namespace XRVLC
             };
             // 统一使用 Underlay：视频在 eye buffer 之下，字幕/UI/手柄由 Unity 正常覆盖。
             _compLayer.overlayType = PXR_CompositionLayer.OverlayType.Underlay;
+            _compLayer.layerDepth = 0;
 
             Debug.Log($"[PicoRenderSurface] RebuildLayer — proj={proj}, isImmersive={isImmersive}, overlayType={_compLayer.overlayType}, shape={_compLayer.overlayShape}");
 
@@ -152,6 +153,7 @@ namespace XRVLC
                     break;
             }
 
+            _compLayer.layerDepth = 0;
             _compLayer.UpdateCoords();
         }
 

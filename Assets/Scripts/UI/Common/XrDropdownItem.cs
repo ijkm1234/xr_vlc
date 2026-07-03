@@ -5,6 +5,8 @@ using UnityEngine.UI;
 
 public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
+    private static readonly Color SeparatorColor = new Color(1f, 1f, 1f, 0.9f);
+
     public Button button;
     public Image background;
     public TextMeshProUGUI primaryText;
@@ -15,6 +17,7 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
     private int _index;
     private bool _selected;
     private bool _hovered;
+    private Image _bottomSeparator;
 
     public void Bind(XrDropdown owner, int index, XrDropdownItemData data)
     {
@@ -43,6 +46,7 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
             button.onClick.AddListener(() => _owner?.SelectIndex(_index));
         }
 
+        SetBottomSeparatorVisible(data?.showBottomSeparator == true);
         ApplyOwnerStyle();
     }
 
@@ -82,7 +86,46 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
         LayoutText(secondaryText, true);
         _owner.StyleText(primaryText, false);
         _owner.StyleText(secondaryText, true);
+        LayoutBottomSeparator();
         ApplyColors();
+    }
+
+    private void SetBottomSeparatorVisible(bool visible)
+    {
+        if (visible)
+            EnsureBottomSeparator();
+        if (_bottomSeparator != null)
+            _bottomSeparator.gameObject.SetActive(visible);
+    }
+
+    private void EnsureBottomSeparator()
+    {
+        if (_bottomSeparator != null)
+            return;
+
+        GameObject separator = new GameObject("BottomSeparator", typeof(RectTransform), typeof(Image));
+        separator.transform.SetParent(transform, false);
+        _bottomSeparator = separator.GetComponent<Image>();
+        _bottomSeparator.color = SeparatorColor;
+        _bottomSeparator.raycastTarget = false;
+        LayoutBottomSeparator();
+    }
+
+    private void LayoutBottomSeparator()
+    {
+        if (_owner == null || _bottomSeparator == null)
+            return;
+
+        RectTransform rect = _bottomSeparator.GetComponent<RectTransform>();
+        if (rect == null)
+            return;
+
+        rect.anchorMin = new Vector2(0f, 0f);
+        rect.anchorMax = new Vector2(1f, 0f);
+        rect.pivot = new Vector2(0.5f, 0f);
+        rect.offsetMin = new Vector2(_owner.horizontalPadding, 0f);
+        rect.offsetMax = new Vector2(-_owner.horizontalPadding, 2f);
+        _bottomSeparator.transform.SetAsLastSibling();
     }
 
     public void OnPointerEnter(PointerEventData eventData)

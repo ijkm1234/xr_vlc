@@ -14,6 +14,9 @@ using Unity.XR.PXR;
 /// </summary>
 public class VlcLibraryLauncher : MonoBehaviour
 {
+    private const int FlagActivityNewTask = 0x10000000;
+    private const string PlaybackServiceBridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
+
     public static VlcLibraryLauncher Instance { get; private set; }
 
     public event Action<string, string> OnVideoSelectedEvent { add { } remove { } }
@@ -137,6 +140,12 @@ public class VlcLibraryLauncher : MonoBehaviour
         Debug.Log("[VlcLibraryLauncher] 收到 Android 返回 Unity 视图通知。");
     }
 
+    public void OnVlcActivityReady()
+    {
+        Debug.Log("[VlcLibraryLauncher] VLC Activity ready; hiding cold start splash when minimum display time is satisfied.");
+        ColdStartSplashOverlay.MarkVlcActivityReady();
+    }
+
     public void OpenVLCMediaLibrary()
     {
         if (Application.platform != RuntimePlatform.Android)
@@ -151,6 +160,7 @@ public class VlcLibraryLauncher : MonoBehaviour
         }
         else
         {
+            ColdStartSplashOverlay.Hide();
             m_OpenVlcAfterPermissionGranted = true;
             RequestRequiredPermissions();
             Debug.Log("正在请求 Android 权限，授权后将自动打开 VLC 媒体库。");
@@ -279,39 +289,43 @@ public class VlcLibraryLauncher : MonoBehaviour
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
             using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
             {
-                ShowLastVlcActivityOrStartFallback(currentActivity);
+                RestoreVlcTaskOrStartFallback(currentActivity);
             }
             Debug.Log("已发送启动 VLC 媒体库 Intent");
         }
         catch (Exception e)
         {
+            ColdStartSplashOverlay.Hide();
             Debug.LogError("打开 VLC 媒体库失败: " + e.Message);
         }
     }
 
-    private void ShowLastVlcActivityOrStartFallback(AndroidJavaObject currentActivity)
+    private void RestoreVlcTaskOrStartFallback(AndroidJavaObject currentActivity)
     {
         try
         {
-            using (AndroidJavaClass bridge = new AndroidJavaClass("org.videolan.vlc.bridge.PlaybackServiceBridge"))
+            using (AndroidJavaClass bridge = new AndroidJavaClass(PlaybackServiceBridgeClassName))
             {
-                if (bridge.CallStatic<bool>("showLastVlcActivity", currentActivity))
+                if (bridge.CallStatic<bool>("restoreVlcTask", currentActivity))
+                {
+                    Debug.Log("已恢复现有 VLC task。");
                     return;
+                }
             }
-            Debug.LogWarning("VLC bridge 未能恢复媒体库，改用 StartActivity。");
-            StartVlcStartActivityFallback(currentActivity);
         }
         catch (Exception bridgeException)
         {
-            Debug.LogWarning("通过 VLC bridge 恢复媒体库失败，改用 StartActivity: " + bridgeException.Message);
-            StartVlcStartActivityFallback(currentActivity);
+            Debug.LogWarning("恢复现有 VLC task 失败，改用启动入口: " + bridgeException.Message);
         }
+
+        StartVlcStartActivity(currentActivity);
     }
 
-    private void StartVlcStartActivityFallback(AndroidJavaObject currentActivity)
+    private void StartVlcStartActivity(AndroidJavaObject currentActivity)
     {
         using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent", currentActivity, new AndroidJavaClass("org.videolan.vlc.StartActivity")))
         {
+            intent.Call<AndroidJavaObject>("addFlags", FlagActivityNewTask);
             currentActivity.Call("startActivity", intent);
         }
     }

@@ -11,16 +11,18 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 [Serializable]
 public sealed class XrDropdownItemData
 {
-    public XrDropdownItemData(string primaryText, string secondaryText = "", object payload = null)
+    public XrDropdownItemData(string primaryText, string secondaryText = "", object payload = null, bool showBottomSeparator = false)
     {
         this.primaryText = primaryText ?? string.Empty;
         this.secondaryText = secondaryText ?? string.Empty;
         this.payload = payload;
+        this.showBottomSeparator = showBottomSeparator;
     }
 
     public string primaryText;
     public string secondaryText;
     public object payload;
+    public bool showBottomSeparator;
 }
 
 [Serializable]
@@ -34,6 +36,7 @@ public sealed class XrDropdown : MonoBehaviour
     private static readonly Color DefaultSelectedColor = new Color(1f, 1f, 1f, 0.24f);
     private static readonly Color DefaultSelectedHoverColor = new Color(1f, 1f, 1f, 0.32f);
     private static readonly Color DefaultPressedColor = new Color(1f, 1f, 1f, 0.24f);
+    private static readonly int UnderlayColorShaderProperty = Shader.PropertyToID("_UnderlayColor");
     private const int PopupBaseSortingOrder = 500;
     private static int _popupSortingOrder = PopupBaseSortingOrder;
 
@@ -67,6 +70,7 @@ public sealed class XrDropdown : MonoBehaviour
     public XrDropdownItem rowPrefab;
 
     [Header("Events")]
+    public UnityEvent onBeforeShow = new UnityEvent();
     public XrDropdownValueChangedEvent onValueChanged = new XrDropdownValueChangedEvent();
 
     [Header("Colors")]
@@ -173,10 +177,12 @@ public sealed class XrDropdown : MonoBehaviour
             return;
 
         gameObject.SetActive(true);
+        onBeforeShow.Invoke();
         EnsureOpenCanvasPriority();
         popup.SetActive(true);
         ApplyLayout();
         RefreshRows();
+        ResetCaptionGraphicState();
         if (scrollRect != null)
             scrollRect.verticalNormalizedPosition = 1f;
     }
@@ -185,6 +191,7 @@ public sealed class XrDropdown : MonoBehaviour
     {
         if (popup != null)
             popup.SetActive(false);
+        ApplyLayout();
         ResetOpenCanvasPriority();
         ResetCaptionGraphicState();
     }
@@ -312,7 +319,7 @@ public sealed class XrDropdown : MonoBehaviour
             popupRect.anchorMin = showCaption ? new Vector2(0f, 0f) : Vector2.zero;
             popupRect.anchorMax = showCaption ? new Vector2(1f, 0f) : Vector2.one;
             popupRect.pivot = showCaption ? new Vector2(0.5f, 1f) : new Vector2(0.5f, 0.5f);
-            popupRect.anchoredPosition = showCaption ? new Vector2(0f, -2f) : Vector2.zero;
+            popupRect.anchoredPosition = Vector2.zero;
             popupRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
             popupRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, popupHeight);
         }
@@ -505,6 +512,25 @@ public sealed class XrDropdown : MonoBehaviour
         text.enableWordWrapping = false;
         text.overflowMode = TextOverflowModes.Ellipsis;
         text.raycastTarget = false;
+        DisableTextUnderlay(text);
+    }
+
+    private static void DisableTextUnderlay(TextMeshProUGUI text)
+    {
+        if (text == null || text.fontSharedMaterial == null)
+            return;
+
+        Material material = text.fontMaterial;
+        if (material == null || !material.HasProperty(UnderlayColorShaderProperty))
+            return;
+
+        Color underlay = material.GetColor(UnderlayColorShaderProperty);
+        if (underlay.a <= 0f)
+            return;
+
+        underlay.a = 0f;
+        material.SetColor(UnderlayColorShaderProperty, underlay);
+        text.UpdateMeshPadding();
     }
 
     private static void EnsureTrigger(EventTrigger trigger, EventTriggerType type, UnityAction<BaseEventData> callback)

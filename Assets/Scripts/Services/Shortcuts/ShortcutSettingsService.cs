@@ -7,14 +7,33 @@ namespace XRVLC.Services.Shortcuts
     {
         public const string KeyShortcutButtonMappings = "xr_button_mappings";
         public const string KeyVideoJumpDelay = "video_jump_delay";
-        public const int DefaultSeekSeconds = 10;
+        public const int DefaultSeekSeconds = 5;
+        public const int MinSeekSeconds = 1;
+        public const int MaxSeekSeconds = 180;
 
         /// <summary>
         /// 从 VLC SharedPreferences 读取手柄快捷键使用的跳转秒数。
         /// </summary>
         public static int LoadShortcutSeekSeconds()
         {
-            return VlcPreferenceStore.GetInt(KeyVideoJumpDelay, DefaultSeekSeconds);
+            return ClampShortcutSeekSeconds(VlcPreferenceStore.GetInt(KeyVideoJumpDelay, DefaultSeekSeconds));
+        }
+
+        /// <summary>
+        /// 保存手柄摇杆左右快进/快退使用的跳转秒数。
+        /// </summary>
+        public static void SaveShortcutSeekSeconds(int seconds)
+        {
+            VlcPreferenceStore.PutInt(KeyVideoJumpDelay, ClampShortcutSeekSeconds(seconds));
+        }
+
+        public static int ClampShortcutSeekSeconds(int seconds)
+        {
+            if (seconds < MinSeekSeconds)
+                return MinSeekSeconds;
+            if (seconds > MaxSeekSeconds)
+                return MaxSeekSeconds;
+            return seconds;
         }
 
         /// <summary>

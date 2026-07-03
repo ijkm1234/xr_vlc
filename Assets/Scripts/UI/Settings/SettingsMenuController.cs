@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -32,13 +33,59 @@ public class SettingsMenuController : MonoBehaviour
     private static readonly Color SelectedButtonColor = new Color(1f, 1f, 1f, 0.24f);
     private static readonly Color HoverButtonColor = new Color(1f, 1f, 1f, 0.16f);
     private static readonly Color SelectedButtonHoverColor = new Color(1f, 1f, 1f, 0.32f);
+    private static readonly Color SwitchOffTrackColor = new Color(1f, 1f, 1f, 0.16f);
+    private static readonly Color SwitchOnTrackColor = new Color(0.18f, 0.58f, 0.95f, 1f);
+    private static readonly Color SwitchBorderColor = new Color(1f, 1f, 1f, 0.22f);
+    private static readonly Color SwitchKnobColor = new Color(1f, 1f, 1f, 0.96f);
     private static readonly Color TextColor = Color.white;
+    private const string IconResourcePath = "UI/IconPark/";
+    private const string GestureInfoIconName = "info";
+    private const string GestureShortcutTooltipText =
+        "摇杆左右：步进/步退\n" +
+        "摇杆左右长按：30s 快进/快退\n" +
+        "摇杆前后：调整屏幕距离\n" +
+        "板机键长按：2x 快速播放\n" +
+        "抓取键：移动屏幕\n" +
+        "按下摇杆：重置屏幕位置";
+    private const string StepperControlResourcePath = "UI/XrStepperControl";
     private const string AudioChannelStereoValue = "stereo";
     private const string AudioChannelMonoValue = "mono";
     private const float GestureLabelColumnWidthRatio = 0.25f;
+    private const float GestureSectionTitleWidth = 112f;
+    private const float GestureInfoIconSize = 28f;
+    private const float GestureInfoIconGap = 6f;
+    private const float SwitchWidth = 76f;
+    private const float SwitchHeight = 38f;
+    private const float SwitchKnobSize = 30f;
+    private const float SwitchKnobTravel = 19f;
+    private static readonly VideoAspectRatio[] VideoAspectRatioOptions =
+    {
+        VideoAspectRatio.Source,
+        VideoAspectRatio.Ratio16x9,
+        VideoAspectRatio.Ratio4x3,
+        VideoAspectRatio.Ratio16x10,
+        VideoAspectRatio.Ratio221x1,
+        VideoAspectRatio.Ratio235x1,
+        VideoAspectRatio.Ratio239x1,
+        VideoAspectRatio.Ratio5x4
+    };
+    private static readonly string[] VideoAspectRatioLabels =
+    {
+        "自动",
+        "16:9",
+        "4:3",
+        "16:10",
+        "2.21:1",
+        "2.35:1",
+        "2.39:1",
+        "5:4"
+    };
 
     [Header("按钮主题")]
     public XrButtonTheme buttonTheme;
+
+    [Header("Control Prefabs")]
+    public XrStepperControl stepperControlPrefab;
 
     [Header("Dropdown Prefabs")]
     public XrDropdown shortcutDropdownPrefab;
@@ -67,10 +114,14 @@ public class SettingsMenuController : MonoBehaviour
     private XrDropdown _rightStickClickDropdown;
     private XrDropdown _buttonYDropdown;
     private XrDropdown _buttonBDropdown;
-    private readonly List<Button> _subtitleModeButtons = new List<Button>();
-    private readonly List<Button> _videoScaleButtons = new List<Button>();
+    private Button _spatialSubtitleSwitchButton;
+    private Button _outsideSubtitleSwitchButton;
+    private XrStepperControl _subtitleDelayStepper;
+    private XrStepperControl _playbackRateStepper;
+    private XrStepperControl _seekSecondsStepper;
+    private XrDropdown _videoAspectRatioDropdown;
     private readonly List<Button> _audioModeButtons = new List<Button>();
-    private int _currentVideoScaleOrdinal;
+    private VideoAspectRatio _currentVideoAspectRatio;
     private AudioChannelMode _currentAudioMode;
 
     public void Bind(XRVLC.Media.PlaybackService playbackService, ShortcutManager shortcutManager = null)
@@ -99,6 +150,17 @@ public class SettingsMenuController : MonoBehaviour
     public bool Contains(GameObject target)
     {
         return target != null && (target == gameObject || target.transform.IsChildOf(transform));
+    }
+
+    private void OnEnable()
+    {
+        VlcPlaybackEvents.OnPlaybackRateChanged += OnPlaybackRateChanged;
+        UpdatePlaybackRateControl();
+    }
+
+    private void OnDisable()
+    {
+        VlcPlaybackEvents.OnPlaybackRateChanged -= OnPlaybackRateChanged;
     }
 
     private void BuildIfNeeded()
@@ -233,48 +295,57 @@ public class SettingsMenuController : MonoBehaviour
     private void BuildPlaybackTab(GameObject root)
     {
         CreateSectionLabel(root.transform, "播放速度");
-        Transform row = CreateRow(root.transform, "PlaybackSpeedRow");
-        CreateButton(row, "0.5x", menuFontSize, () => ApplyPlaybackRate(0.5f), 104f, 46f);
-        CreateButton(row, "1x", menuFontSize, () => ApplyPlaybackRate(1f), 104f, 46f);
-        CreateButton(row, "1.25x", menuFontSize, () => ApplyPlaybackRate(1.25f), 104f, 46f);
-        CreateButton(row, "1.5x", menuFontSize, () => ApplyPlaybackRate(1.5f), 104f, 46f);
-        CreateButton(row, "2x", menuFontSize, () => ApplyPlaybackRate(2f), 104f, 46f);
+        CreatePlaybackRateStepper(root.transform);
+        _seekSecondsStepper = CreateStepperRow(
+            root.transform,
+            "ShortcutSeekSecondsRow",
+            "步进时长",
+            ShortcutSettingsService.DefaultSeekSeconds.ToString(CultureInfo.InvariantCulture),
+            () => StepSeekSeconds(-1),
+            () => StepSeekSeconds(1),
+            ApplySeekSecondsFromInput);
     }
 
     private void BuildGestureTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "手柄快捷键");
+        CreateSectionLabel(root.transform, "手柄快捷键", true);
         _leftStickClickDropdown = CreateShortcutDropdown(root.transform, "左摇杆按下");
         _rightStickClickDropdown = CreateShortcutDropdown(root.transform, "右摇杆按下");
         _buttonYDropdown = CreateShortcutDropdown(root.transform, "Y 按钮");
         _buttonBDropdown = CreateShortcutDropdown(root.transform, "B 按钮");
-        CreateGestureSaveRow(root.transform);
         LoadGestureValues();
     }
 
     private void BuildSubtitleTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "字幕渲染模式");
-        Transform row = CreateRow(root.transform, "SubtitleRenderModeRow");
-        _subtitleModeButtons.Add(CreateButton(row, "原生", menuFontSize, () => ApplySubtitleMode(SubtitleRenderMode.Native), 132f, 46f));
-        _subtitleModeButtons.Add(CreateButton(row, "空间", menuFontSize, () => ApplySubtitleMode(SubtitleRenderMode.Spatial), 132f, 46f));
-        _subtitleModeButtons.Add(CreateButton(row, "关闭", menuFontSize, () => ApplySubtitleMode(SubtitleRenderMode.Off), 132f, 46f));
+        CreateSectionLabel(root.transform, "字幕");
+        _spatialSubtitleSwitchButton = CreateSwitchRow(root.transform, "SpatialSubtitleSwitchRow", "使用空间字幕", ToggleSpatialSubtitles);
+        _outsideSubtitleSwitchButton = CreateSwitchRow(root.transform, "SubtitleOutsideSwitchRow", "渲染在屏幕外", ToggleRenderSubtitlesOutsideScreen);
+        _subtitleDelayStepper = CreateStepperRow(
+            root.transform,
+            "SubtitleDelayRow",
+            "字幕延迟",
+            "0.0",
+            () => StepSubtitleDelay(-0.5f),
+            () => StepSubtitleDelay(0.5f),
+            ApplySubtitleDelayFromInput);
+    }
+
+    private void CreatePlaybackRateStepper(Transform parent)
+    {
+        _playbackRateStepper = CreateStepperRow(
+            parent,
+            "PlaybackRateStepperRow",
+            "倍速",
+            "1.00",
+            () => StepPlaybackRate(-0.25f),
+            () => StepPlaybackRate(0.25f),
+            ApplyPlaybackRateFromInput);
     }
 
     private void BuildVideoTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "画面拉伸裁剪");
-        Transform firstRow = CreateRow(root.transform, "VideoScalePrimaryRow");
-        _videoScaleButtons.Add(CreateVideoScaleButton(firstRow, "适应", 0));
-        _videoScaleButtons.Add(CreateVideoScaleButton(firstRow, "拉伸", 1));
-        _videoScaleButtons.Add(CreateVideoScaleButton(firstRow, "填充裁剪", 2));
-        _videoScaleButtons.Add(CreateVideoScaleButton(firstRow, "原始", 11));
-
-        Transform aspectRow = CreateRow(root.transform, "VideoScaleAspectRow");
-        _videoScaleButtons.Add(CreateVideoScaleButton(aspectRow, "16:9", 3));
-        _videoScaleButtons.Add(CreateVideoScaleButton(aspectRow, "4:3", 4));
-        _videoScaleButtons.Add(CreateVideoScaleButton(aspectRow, "16:10", 5));
-        _videoScaleButtons.Add(CreateVideoScaleButton(aspectRow, "2.35:1", 8));
+        _videoAspectRatioDropdown = CreateVideoAspectRatioDropdown(root.transform);
     }
 
     private void BuildAudioTab(GameObject root)
@@ -285,11 +356,141 @@ public class SettingsMenuController : MonoBehaviour
         _audioModeButtons.Add(CreateButton(row, "混合单声道", menuFontSize, () => ApplyAudioMode(AudioChannelMode.Mono), 206f, 46f));
     }
 
-    private Button CreateVideoScaleButton(Transform parent, string label, int scaleOrdinal)
+    private XrDropdown CreateVideoAspectRatioDropdown(Transform parent)
     {
-        Button button = CreateButton(parent, label, menuFontSize, () => ApplyVideoScale(scaleOrdinal), 132f, 46f);
-        button.gameObject.name = label + "#" + scaleOrdinal;
+        Transform row = CreateRow(parent, "VideoAspectRatioRow");
+        CreateText(row, "宽高比", menuFontSize, TextAlignmentOptions.Left, 180f, shortcutDropdownHeight);
+
+        if (shortcutDropdownPrefab == null)
+        {
+            Debug.LogError("[SettingsMenuController] shortcutDropdownPrefab is not assigned. Video aspect ratio settings require the shared XrDropdown prefab.");
+            return null;
+        }
+
+        XrDropdown dropdown = Instantiate(shortcutDropdownPrefab, row, false);
+        dropdown.gameObject.name = "VideoAspectRatioDropdown";
+        dropdown.showCaption = true;
+        dropdown.width = 220f;
+        dropdown.fontSize = dropdownFontSize;
+        dropdown.horizontalPadding = 16f;
+        dropdown.verticalPadding = 12f;
+        dropdown.minRowHeight = shortcutDropdownHeight;
+        dropdown.secondaryTextWidth = 0f;
+        dropdown.maxVisibleItems = VideoAspectRatioOptions.Length;
+        dropdown.panelColor = DropdownPanelColor;
+        ConfigureShortcutDropdownVisual(dropdown);
+        dropdown.ApplyConfiguredLayout();
+
+        var element = dropdown.GetComponent<LayoutElement>();
+        if (element == null)
+            element = dropdown.gameObject.AddComponent<LayoutElement>();
+        element.minWidth = 220f;
+        element.minHeight = shortcutDropdownHeight;
+        element.preferredWidth = 220f;
+        element.preferredHeight = shortcutDropdownHeight;
+        element.flexibleWidth = 0f;
+        element.flexibleHeight = 0f;
+
+        dropdown.SetItems(CreateVideoAspectRatioItems(), GetVideoAspectRatioIndex(_currentVideoAspectRatio));
+        dropdown.onBeforeShow.AddListener(() => CloseOtherDropdowns(dropdown));
+        dropdown.onValueChanged.AddListener(ApplyVideoAspectRatioFromDropdown);
+        dropdown.ApplyConfiguredLayout();
+        return dropdown;
+    }
+
+    private Button CreateSwitchRow(Transform parent, string name, string label, UnityEngine.Events.UnityAction onClick)
+    {
+        Transform row = CreateRow(parent, name);
+        CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, 260f, 46f);
+        return CreateSwitchButton(row, name + "Switch", onClick);
+    }
+
+    private Button CreateSwitchButton(Transform parent, string name, UnityEngine.Events.UnityAction onClick)
+    {
+        var item = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage), typeof(Button), typeof(LayoutElement));
+        item.transform.SetParent(parent, false);
+
+        var element = item.GetComponent<LayoutElement>();
+        element.preferredWidth = SwitchWidth;
+        element.preferredHeight = SwitchHeight;
+        element.flexibleWidth = 0f;
+        element.flexibleHeight = 0f;
+
+        var track = item.GetComponent<RoundedRectImage>();
+        track.cornerRadius = SwitchHeight * 0.5f;
+        track.borderWidth = 1f;
+        track.borderColor = SwitchBorderColor;
+        track.color = SwitchOffTrackColor;
+        track.raycastTarget = true;
+
+        var knobObject = new GameObject("Knob", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage));
+        knobObject.transform.SetParent(item.transform, false);
+
+        var knobRect = knobObject.GetComponent<RectTransform>();
+        knobRect.anchorMin = new Vector2(0.5f, 0.5f);
+        knobRect.anchorMax = new Vector2(0.5f, 0.5f);
+        knobRect.pivot = new Vector2(0.5f, 0.5f);
+        knobRect.sizeDelta = new Vector2(SwitchKnobSize, SwitchKnobSize);
+        knobRect.anchoredPosition = new Vector2(-SwitchKnobTravel, 0f);
+
+        var knob = knobObject.GetComponent<RoundedRectImage>();
+        knob.cornerRadius = SwitchKnobSize * 0.5f;
+        knob.color = SwitchKnobColor;
+        knob.raycastTarget = false;
+
+        Button button = item.GetComponent<Button>();
+        button.transition = Selectable.Transition.None;
+        button.targetGraphic = track;
+        if (onClick != null)
+            button.onClick.AddListener(onClick);
         return button;
+    }
+
+    private XrStepperControl CreateStepperRow(
+        Transform parent,
+        string name,
+        string label,
+        string initialValue,
+        UnityEngine.Events.UnityAction onDecrement,
+        UnityEngine.Events.UnityAction onIncrement,
+        UnityEngine.Events.UnityAction<string> onSubmit)
+    {
+        Transform row = CreateRow(parent, name);
+        CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, 180f, 46f);
+        return CreateStepperControl(row, label + "Stepper", initialValue, onDecrement, onIncrement, onSubmit);
+    }
+
+    private XrStepperControl CreateStepperControl(
+        Transform parent,
+        string name,
+        string initialValue,
+        UnityEngine.Events.UnityAction onDecrement,
+        UnityEngine.Events.UnityAction onIncrement,
+        UnityEngine.Events.UnityAction<string> onSubmit)
+    {
+        XrStepperControl prefab = stepperControlPrefab != null
+            ? stepperControlPrefab
+            : Resources.Load<XrStepperControl>(StepperControlResourcePath);
+
+        XrStepperControl control = prefab != null
+            ? Instantiate(prefab, parent, false)
+            : new GameObject(name, typeof(RectTransform), typeof(XrStepperControl)).GetComponent<XrStepperControl>();
+
+        control.transform.SetParent(parent, false);
+        control.gameObject.name = name;
+        control.Configure(initialValue, menuFontSize, onDecrement, onIncrement, onSubmit);
+        ApplyStepperControlTheme(control);
+        return control;
+    }
+
+    private void ApplyStepperControlTheme(XrStepperControl control)
+    {
+        if (control == null)
+            return;
+
+        control.ApplyStyle(menuFontSize, TextColor, new Color(1f, 1f, 1f, 0.12f));
+        ApplyButtonTheme(control.decrementButton, control.decrementButton != null ? control.decrementButton.GetComponent<Image>() : null, false);
+        ApplyButtonTheme(control.incrementButton, control.incrementButton != null ? control.incrementButton.GetComponent<Image>() : null, false);
     }
 
     private XrDropdown CreateShortcutDropdown(Transform parent, string label)
@@ -335,14 +536,32 @@ public class SettingsMenuController : MonoBehaviour
             new XrDropdownItemData("切换字幕"),
             new XrDropdownItemData("恢复屏幕默认位置")
         });
+        dropdown.onBeforeShow.AddListener(() => CloseOtherShortcutDropdowns(dropdown));
+        dropdown.onValueChanged.AddListener(_ => SaveGestureMappings());
         dropdown.ApplyConfiguredLayout();
         return dropdown;
     }
 
-    private void CreateGestureSaveRow(Transform parent)
+    private void CloseOtherShortcutDropdowns(XrDropdown keepOpen)
     {
-        Transform row = CreateGestureRow(parent, "GestureSaveRow");
-        CreateButton(row, "保存手势设置", menuFontSize, SaveGestureMappings, 216f, 48f);
+        CloseOtherDropdowns(keepOpen);
+    }
+
+    private void CloseOtherDropdowns(XrDropdown keepOpen)
+    {
+        CloseShortcutDropdownIfNot(_leftStickClickDropdown, keepOpen);
+        CloseShortcutDropdownIfNot(_rightStickClickDropdown, keepOpen);
+        CloseShortcutDropdownIfNot(_buttonYDropdown, keepOpen);
+        CloseShortcutDropdownIfNot(_buttonBDropdown, keepOpen);
+        CloseShortcutDropdownIfNot(_videoAspectRatioDropdown, keepOpen);
+    }
+
+    private static void CloseShortcutDropdownIfNot(XrDropdown dropdown, XrDropdown keepOpen)
+    {
+        if (dropdown == null || dropdown == keepOpen || !dropdown.IsOpen)
+            return;
+
+        dropdown.CloseImmediately();
     }
 
     private void ConfigureShortcutDropdownVisual(XrDropdown dropdown)
@@ -470,11 +689,58 @@ public class SettingsMenuController : MonoBehaviour
         element.flexibleHeight = 0f;
     }
 
-    private void CreateSectionLabel(Transform parent, string label)
+    private void CreateSectionLabel(Transform parent, string label, bool showGestureInfo = false)
     {
         Transform row = CreateSectionLabelRow(parent, label + "TitleRow");
         CreateSpacer(row, sectionTitleLeftPadding, 36f);
+
+        if (showGestureInfo)
+        {
+            CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleWidth, 36f);
+            CreateSpacer(row, GestureInfoIconGap, 36f);
+            CreateGestureInfoButton(row);
+            return;
+        }
+
         CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, Mathf.Max(0f, menuWidth - sectionTitleLeftPadding), 36f);
+    }
+
+    private void CreateGestureInfoButton(Transform parent)
+    {
+        var item = new GameObject("GestureInfoButton", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button), typeof(LayoutElement), typeof(XrOverflowTooltip));
+        item.transform.SetParent(parent, false);
+
+        var element = item.GetComponent<LayoutElement>();
+        element.preferredWidth = GestureInfoIconSize;
+        element.preferredHeight = GestureInfoIconSize;
+        element.flexibleWidth = 0f;
+        element.flexibleHeight = 0f;
+
+        Image image = item.GetComponent<Image>();
+        image.sprite = Resources.Load<Sprite>(IconResourcePath + GestureInfoIconName);
+        image.color = Color.white;
+        image.preserveAspect = true;
+        image.raycastTarget = true;
+        if (image.sprite == null)
+            Debug.LogWarning($"[SettingsMenuController] IconPark 图标未找到: {GestureInfoIconName}");
+
+        Button button = item.GetComponent<Button>();
+        button.targetGraphic = image;
+        button.transition = Selectable.Transition.ColorTint;
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1f, 1f, 1f, 0.78f);
+        colors.selectedColor = Color.white;
+        colors.pressedColor = new Color(1f, 1f, 1f, 0.64f);
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.32f);
+        colors.colorMultiplier = 1f;
+        colors.fadeDuration = 0.08f;
+        button.colors = colors;
+
+        XrOverflowTooltip tooltip = item.GetComponent<XrOverflowTooltip>();
+        tooltip.SetOverlayRoot(transform);
+        tooltip.alignTopLeftToSource = true;
+        tooltip.SetSource(null, GestureShortcutTooltipText);
     }
 
     private Transform CreateSectionLabelRow(Transform parent, string name)
@@ -552,13 +818,24 @@ public class SettingsMenuController : MonoBehaviour
 
         if (tab == SettingsTab.Gesture)
             LoadGestureValues();
+        if (tab == SettingsTab.Subtitle)
+            UpdateSubtitleControls();
+        if (tab == SettingsTab.Playback)
+        {
+            UpdatePlaybackRateControl();
+            UpdateSeekSecondsControl();
+        }
     }
 
     private void RefreshAllSelections()
     {
-        _currentVideoScaleOrdinal = PlaybackUiSettingsService.LoadVideoScaleOrdinal();
-        UpdateSubtitleModeSelection();
-        UpdateVideoScaleSelection();
+        _currentVideoAspectRatio = _playbackService != null
+            ? _playbackService.CurrentVideoAspectRatio
+            : PlaybackUiSettingsService.LoadVideoAspectRatio();
+        UpdateSubtitleControls();
+        UpdatePlaybackRateControl();
+        UpdateSeekSecondsControl();
+        UpdateVideoLayoutSelection();
         UpdateAudioModeSelection();
         LoadGestureValues();
     }
@@ -592,22 +869,110 @@ public class SettingsMenuController : MonoBehaviour
     private void ApplyPlaybackRate(float rate)
     {
         _playbackService?.SetPlaybackRate(rate);
+        UpdatePlaybackRateControl();
     }
 
-    private void ApplySubtitleMode(SubtitleRenderMode mode)
+    private void ToggleSpatialSubtitles()
     {
         if (_playbackService == null)
             _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
-        _playbackService?.SetSubtitleRenderMode(mode);
-        UpdateSubtitleModeSelection();
+        if (_playbackService == null)
+            return;
+
+        bool enableSpatial = _playbackService.SubtitleRenderMode != SubtitleRenderMode.Spatial;
+        _playbackService.SetSubtitleRenderMode(enableSpatial ? SubtitleRenderMode.Spatial : SubtitleRenderMode.Native);
+        UpdateSubtitleControls();
     }
 
-    private void ApplyVideoScale(int scaleOrdinal)
+    private void ToggleRenderSubtitlesOutsideScreen()
     {
-        _currentVideoScaleOrdinal = scaleOrdinal;
-        PlaybackUiSettingsService.SaveVideoScaleOrdinal(scaleOrdinal);
-        VlcPlaybackBridge.SetVideoScaleOrdinal(scaleOrdinal);
-        UpdateVideoScaleSelection();
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        if (_playbackService == null)
+            return;
+
+        _playbackService.SetRenderSubtitlesOutsideScreen(!_playbackService.RenderSubtitlesOutsideScreen);
+        UpdateSubtitleControls();
+    }
+
+    private void StepSubtitleDelay(float deltaSeconds)
+    {
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        if (_playbackService == null)
+            return;
+
+        _playbackService.SetSubtitleDelaySeconds(_playbackService.SubtitleDelaySeconds + deltaSeconds);
+        UpdateSubtitleControls();
+    }
+
+    private void ApplySubtitleDelayFromInput(string value)
+    {
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        if (_playbackService == null)
+            return;
+
+        if (TryParseFloat(value, out float seconds))
+            _playbackService.SetSubtitleDelaySeconds(SnapToStep(seconds, 0.5f));
+        UpdateSubtitleControls();
+    }
+
+    private void StepPlaybackRate(float delta)
+    {
+        float current = _playbackService != null ? VlcPlaybackEvents.Snapshot.PlaybackRate : 1f;
+        ApplyPlaybackRate(Mathf.Max(0.25f, SnapToStep(current + delta, 0.25f)));
+    }
+
+    private void ApplyPlaybackRateFromInput(string value)
+    {
+        if (TryParseFloat(value, out float rate))
+            ApplyPlaybackRate(Mathf.Max(0.25f, SnapToStep(rate, 0.25f)));
+        else
+            UpdatePlaybackRateControl();
+    }
+
+    private void StepSeekSeconds(int deltaSeconds)
+    {
+        int current = ShortcutSettingsService.LoadShortcutSeekSeconds();
+        ApplySeekSeconds(current + deltaSeconds);
+    }
+
+    private void ApplySeekSecondsFromInput(string value)
+    {
+        if (TryParseInt(value, out int seconds))
+            ApplySeekSeconds(seconds);
+        else
+            UpdateSeekSecondsControl();
+    }
+
+    private void ApplySeekSeconds(int seconds)
+    {
+        int safeSeconds = ShortcutSettingsService.ClampShortcutSeekSeconds(seconds);
+        ShortcutSettingsService.SaveShortcutSeekSeconds(safeSeconds);
+        if (_shortcutManager == null)
+            _shortcutManager = FindAnyObjectByType<ShortcutManager>();
+        _shortcutManager?.ReloadConfig();
+        UpdateSeekSecondsControl();
+    }
+
+    private void ApplyVideoAspectRatio(VideoAspectRatio aspectRatio)
+    {
+        _currentVideoAspectRatio = aspectRatio;
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        if (_playbackService != null)
+            _playbackService.SetVideoAspectRatio(aspectRatio);
+        else
+            PlaybackUiSettingsService.SaveVideoAspectRatio(aspectRatio);
+
+        UpdateVideoLayoutSelection();
+    }
+
+    private void ApplyVideoAspectRatioFromDropdown(int index)
+    {
+        ApplyVideoAspectRatio(GetVideoAspectRatioOption(index));
     }
 
     private void ApplyAudioMode(AudioChannelMode mode)
@@ -617,25 +982,83 @@ public class SettingsMenuController : MonoBehaviour
         UpdateAudioModeSelection();
     }
 
-    private void UpdateSubtitleModeSelection()
+    private void UpdateSubtitleControls()
     {
         SubtitleRenderMode mode = _playbackService != null
             ? _playbackService.SubtitleRenderMode
             : SubtitleRenderMode.Spatial;
 
-        SetButtonSelected(_subtitleModeButtons.Count > 0 ? _subtitleModeButtons[0] : null, mode == SubtitleRenderMode.Native);
-        SetButtonSelected(_subtitleModeButtons.Count > 1 ? _subtitleModeButtons[1] : null, mode == SubtitleRenderMode.Spatial);
-        SetButtonSelected(_subtitleModeButtons.Count > 2 ? _subtitleModeButtons[2] : null, mode == SubtitleRenderMode.Off);
+        bool spatial = mode == SubtitleRenderMode.Spatial;
+        SetSwitchButtonState(_spatialSubtitleSwitchButton, spatial);
+        SetSwitchButtonState(_outsideSubtitleSwitchButton, _playbackService != null && _playbackService.RenderSubtitlesOutsideScreen);
+
+        if (_subtitleDelayStepper != null)
+            _subtitleDelayStepper.SetValueWithoutNotify(FormatSignedSeconds(_playbackService != null ? _playbackService.SubtitleDelaySeconds : 0f));
     }
 
-    private void UpdateVideoScaleSelection()
+    private void UpdatePlaybackRateControl()
     {
-        for (int i = 0; i < _videoScaleButtons.Count; i++)
+        if (_playbackRateStepper != null)
+            _playbackRateStepper.SetValueWithoutNotify(FormatRate(VlcPlaybackEvents.Snapshot.PlaybackRate));
+    }
+
+    private void UpdateSeekSecondsControl()
+    {
+        if (_seekSecondsStepper != null)
+            _seekSecondsStepper.SetValueWithoutNotify(FormatSeconds(ShortcutSettingsService.LoadShortcutSeekSeconds()));
+    }
+
+    private void OnPlaybackRateChanged(float rate)
+    {
+        UpdatePlaybackRateControl();
+    }
+
+    private void SetSwitchButtonState(Button button, bool enabled)
+    {
+        if (button == null) return;
+
+        RoundedRectImage track = button.GetComponent<RoundedRectImage>();
+        if (track != null)
         {
-            Button button = _videoScaleButtons[i];
-            int scaleOrdinal = ExtractTrailingScaleOrdinal(button);
-            SetButtonSelected(button, scaleOrdinal == _currentVideoScaleOrdinal);
+            track.color = enabled ? SwitchOnTrackColor : SwitchOffTrackColor;
+            track.borderColor = enabled ? SwitchOnTrackColor : SwitchBorderColor;
+            button.targetGraphic = track;
+            track.SetVerticesDirty();
         }
+
+        RectTransform knob = button.transform.Find("Knob") as RectTransform;
+        if (knob != null)
+            knob.anchoredPosition = new Vector2(enabled ? SwitchKnobTravel : -SwitchKnobTravel, 0f);
+    }
+
+    private void UpdateVideoLayoutSelection()
+    {
+        if (_videoAspectRatioDropdown != null)
+            _videoAspectRatioDropdown.SetValueWithoutNotify(GetVideoAspectRatioIndex(_currentVideoAspectRatio));
+    }
+
+    private static List<XrDropdownItemData> CreateVideoAspectRatioItems()
+    {
+        var items = new List<XrDropdownItemData>(VideoAspectRatioLabels.Length);
+        for (int i = 0; i < VideoAspectRatioLabels.Length; i++)
+            items.Add(new XrDropdownItemData(VideoAspectRatioLabels[i]));
+        return items;
+    }
+
+    private static int GetVideoAspectRatioIndex(VideoAspectRatio aspectRatio)
+    {
+        for (int i = 0; i < VideoAspectRatioOptions.Length; i++)
+            if (VideoAspectRatioOptions[i] == aspectRatio)
+                return i;
+
+        return 0;
+    }
+
+    private static VideoAspectRatio GetVideoAspectRatioOption(int index)
+    {
+        return index >= 0 && index < VideoAspectRatioOptions.Length
+            ? VideoAspectRatioOptions[index]
+            : VideoAspectRatio.Source;
     }
 
     private void UpdateAudioModeSelection()
@@ -644,18 +1067,53 @@ public class SettingsMenuController : MonoBehaviour
         SetButtonSelected(_audioModeButtons.Count > 1 ? _audioModeButtons[1] : null, _currentAudioMode == AudioChannelMode.Mono);
     }
 
-    private static int ExtractTrailingScaleOrdinal(Button button)
-    {
-        string objectName = button != null ? button.gameObject.name : string.Empty;
-        int separator = objectName.LastIndexOf('#');
-        if (separator < 0)
-            return -1;
-        return int.TryParse(objectName.Substring(separator + 1), out int value) ? value : -1;
-    }
-
     private static string ToAudioChannelModeValue(AudioChannelMode mode)
     {
         return mode == AudioChannelMode.Mono ? AudioChannelMonoValue : AudioChannelStereoValue;
+    }
+
+    private static bool TryParseFloat(string value, out float result)
+    {
+        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result)
+            || float.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out result);
+    }
+
+    private static bool TryParseInt(string value, out int result)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
+            return true;
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.CurrentCulture, out result))
+            return true;
+        if (TryParseFloat(value, out float floatValue))
+        {
+            result = Mathf.RoundToInt(floatValue);
+            return true;
+        }
+
+        result = 0;
+        return false;
+    }
+
+    private static float SnapToStep(float value, float step)
+    {
+        return step <= 0f ? value : Mathf.Round(value / step) * step;
+    }
+
+    private static string FormatSignedSeconds(float seconds)
+    {
+        return seconds.ToString("0.0", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatRate(float rate)
+    {
+        if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
+            rate = 1f;
+        return rate.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatSeconds(int seconds)
+    {
+        return seconds.ToString(CultureInfo.InvariantCulture);
     }
 
     private void SetDropdownValue(XrDropdown dropdown, string actionKey)

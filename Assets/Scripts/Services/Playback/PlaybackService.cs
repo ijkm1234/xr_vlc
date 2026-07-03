@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using XRVLC.Media;
+using XRVLC.Services.Settings;
 
 namespace XRVLC.Media
 {
@@ -21,7 +22,11 @@ namespace XRVLC.Media
         public PlayerStatus CurrentStatus => VlcPlaybackEvents.Snapshot.Status;
         public bool UseHardwareDecoding { get; private set; } = true;
         public SubtitleRenderMode SubtitleRenderMode { get; private set; } = SubtitleRenderMode.Spatial;
+        public bool RenderSubtitlesOutsideScreen { get; private set; }
+        public float SubtitleDelaySeconds { get; private set; }
         public VideoGeometrySelection CurrentGeometrySelection => _currentGeometrySelection;
+        public VideoScaleMode CurrentVideoScaleMode { get; private set; } = VideoScaleMode.Fit;
+        public VideoAspectRatio CurrentVideoAspectRatio { get; private set; } = VideoAspectRatio.Source;
         
         public MediaWrapper CurrentMedia { get; private set; }
 
@@ -39,7 +44,6 @@ namespace XRVLC.Media
         public event Action<float> OnBuffering;
         public event Action<List<TrackInfo>> OnAudioTracksChanged;
         public event Action<List<TrackInfo>> OnSubtitleTracksChanged;
-        public event Action<SubtitleCue> OnSubtitleCue;
 #pragma warning restore 0067
 
         // --- PlayerController 状态 ---
@@ -47,6 +51,8 @@ namespace XRVLC.Media
         private long _pendingStartTimeMs = 0;
         private int _currentWidth = 0;
         private int _currentHeight = 0;
+        private int _currentVisibleWidth = 0;
+        private int _currentVisibleHeight = 0;
         private readonly TrackSelectionService _trackSelectionService = new TrackSelectionService();
         private bool _isShortcutFastRate;
         private VideoScreenGeometryService _geometryService;
@@ -54,6 +60,14 @@ namespace XRVLC.Media
         private bool _hasManualGeometryOverride;
         private VideoGeometrySelection _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
         private VideoGeometrySelection _currentGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
+        private Coroutine _geometryBindingCoroutine;
+        private Coroutine _nativeSubtitleSurfaceCoroutine;
+        private VideoSurfaceSpec? _boundVideoSurfaceSpec;
+        private SubtitleSurfaceSpec? _boundSubtitleSurfaceSpec;
+        private bool _videoSurfaceBoundToVlc;
+        private bool _subtitleSurfaceBoundToVlc;
+        private VlcVideoSize CurrentVideoSize =>
+            new VlcVideoSize(_currentWidth, _currentHeight, _currentVisibleWidth, _currentVisibleHeight);
 
         private void Awake()
         {
@@ -78,9 +92,13 @@ namespace XRVLC.Media
                 return;
             }
 
+            CurrentVideoScaleMode = VideoScaleMode.Fit;
+            CurrentVideoAspectRatio = PlaybackUiSettingsService.LoadVideoAspectRatio();
+            videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
+
             // 初始化底层渲染屏幕
             videoScreen.RebuildLayer(UseHardwareDecoding);
-            _geometryService = new VideoScreenGeometryService(videoScreen, () => CurrentMedia, () => UseHardwareDecoding, GetManualGeometryOverride);
+            _geometryService = CreateGeometryService(videoScreen);
 
             // 订阅 Bridge 回调
             VlcPlaybackEvents.OnMediaParseFinished += HandleMediaParseFinished;
@@ -91,14 +109,19 @@ namespace XRVLC.Media
             VlcPlaybackEvents.OnBuffering += HandleBuffering;
             VlcPlaybackEvents.OnAudioTracksChanged += HandleAudioTracksChanged;
             VlcPlaybackEvents.OnSubtitleTracksChanged += HandleSubtitleTracksChanged;
-            VlcPlaybackEvents.OnSubtitleCue += HandleSubtitleCue;
             VlcPlaybackEvents.OnPlayRequested += LoadAndPlay;
+            VlcPlaybackEvents.OnClearPlaybackSurface += ClearPlaybackSurfaceForMediaSwitch;
 
             VlcPlaybackBridge.SetSubtitleRenderMode(SubtitleRenderMode);
+            VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
         }
 
         private void OnDestroy()
         {
+            DisableAndDetachSubtitleSurface(false);
+            if (videoScreen != null)
+                videoScreen.DestroyFlatSubtitleLayer();
+
             // 取消订阅
             VlcPlaybackEvents.OnMediaParseFinished -= HandleMediaParseFinished;
             VlcPlaybackEvents.OnVideoSizeChanged -= OnVideoSizeChanged;
@@ -108,8 +131,8 @@ namespace XRVLC.Media
             VlcPlaybackEvents.OnBuffering -= HandleBuffering;
             VlcPlaybackEvents.OnAudioTracksChanged -= HandleAudioTracksChanged;
             VlcPlaybackEvents.OnSubtitleTracksChanged -= HandleSubtitleTracksChanged;
-            VlcPlaybackEvents.OnSubtitleCue -= HandleSubtitleCue;
             VlcPlaybackEvents.OnPlayRequested -= LoadAndPlay;
+            VlcPlaybackEvents.OnClearPlaybackSurface -= ClearPlaybackSurfaceForMediaSwitch;
         }
 
         private void HandleStatusChanged(PlayerStatus status)
@@ -140,6 +163,8 @@ namespace XRVLC.Media
             _pendingStartTimeMs = startTimeMs;
             _currentWidth = 0;
             _currentHeight = 0;
+            _currentVisibleWidth = 0;
+            _currentVisibleHeight = 0;
 
             // 2. 告诉 AAR 预加载 URL
             // 获取暂存的 JSON 字符串，如果为空则直接使用 URI
@@ -154,17 +179,17 @@ namespace XRVLC.Media
         /// </summary>
         private void HandleMediaParseFinished(VlcMediaParseResult result)
         {
-            int width  = result.width;
-            int height = result.height;
+            VlcVideoSize videoSize = result.ToVideoSize();
+            int width = videoSize.Width;
+            int height = videoSize.Height;
 
-            if (width <= 0 || height <= 0)
+            if (!videoSize.IsValid)
             {
-                Debug.LogWarning($"[PlaybackService] HandleMediaParseFinished: 无效尺寸 {width}x{height}");
+                Debug.LogWarning($"[PlaybackService] HandleMediaParseFinished: 无效尺寸 raw={width}x{height}, visible={videoSize.VisibleWidth}x{videoSize.VisibleHeight}");
                 return;
             }
 
-            _currentWidth  = width;
-            _currentHeight = height;
+            SetCurrentVideoSize(videoSize);
 
             // 将 Android 解析出的 projection 写回 CurrentMedia，
             // ProjectionDetector 会把它作为 Priority 1 使用。
@@ -178,35 +203,186 @@ namespace XRVLC.Media
                 };
             }
 
-            Debug.Log($"[PlaybackService] OnMediaParseFinished: {width}x{height}, projection={result.projection}, duration={result.duration}ms");
-            RebuildAndApplyGeometry((uint)width, (uint)height);
+            Debug.Log($"[PlaybackService] OnMediaParseFinished: raw={width}x{height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}, projection={result.projection}, duration={result.duration}ms");
+            RebuildAndApplyGeometry(videoSize);
         }
 
         /// <summary>
         /// 由 onNewVideoLayout 触发，用于解码器实际输出与静态解析不一致时的二次矫正。
         /// 此时 CurrentMedia.Projection 已由 HandleMediaParseFinished 更新，SetGeometry 结果一致。
         /// </summary>
-        private void OnVideoSizeChanged(int width, int height)
+        private void OnVideoSizeChanged(VlcVideoSize videoSize)
         {
-            if (width <= 0 || height <= 0) return;
-            if (_currentWidth == width && _currentHeight == height) return;
+            if (!videoSize.IsValid) return;
 
-            _currentWidth  = width;
-            _currentHeight = height;
+            VlcVideoSize previousSize = CurrentVideoSize;
+            VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
+            VideoSurfaceSpec nextVideoSpec = CreateVideoSurfaceSpec(videoSize, nextGeometry);
+            bool contentUnchanged = previousSize.IsValid && HasSameContentDimensions(previousSize, videoSize);
+            bool geometryUnchanged = HasSameGeometry(_currentGeometrySelection, nextGeometry);
+            bool surfaceAlreadyCurrent = _geometryBindingCoroutine != null || IsVideoSurfaceCurrent(nextVideoSpec);
 
-            Debug.Log($"[PlaybackService] OnVideoSizeChanged (矫正): {width}x{height}");
-            RebuildAndApplyGeometry((uint)width, (uint)height);
+            SetCurrentVideoSize(videoSize);
+
+            if (contentUnchanged && geometryUnchanged && surfaceAlreadyCurrent)
+            {
+                if (!previousSize.HasSameDimensions(videoSize))
+                {
+                    Debug.Log(
+                        $"[PlaybackService] OnVideoSizeChanged ignored raw layout padding change: " +
+                        $"raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
+                }
+                return;
+            }
+
+            Debug.Log($"[PlaybackService] OnVideoSizeChanged (矫正): raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
+            RebuildAndApplyGeometry(videoSize);
         }
 
-        private void RebuildAndApplyGeometry(uint width, uint height)
+        private void RebuildAndApplyGeometry(VlcVideoSize videoSize)
         {
             if (_geometryService == null && videoScreen != null)
-                _geometryService = new VideoScreenGeometryService(videoScreen, () => CurrentMedia, () => UseHardwareDecoding, GetManualGeometryOverride);
+                _geometryService = CreateGeometryService(videoScreen);
             if (_geometryService != null)
             {
                 _currentGeometrySelection = ResolveRequestedGeometry();
-                StartCoroutine(_geometryService.RebuildAndBind(width, height));
+                if (_geometryBindingCoroutine != null)
+                    StopCoroutine(_geometryBindingCoroutine);
+                _geometryBindingCoroutine = StartCoroutine(RebuildGeometryAndSubtitleSurface(videoSize));
             }
+        }
+
+        private VideoScreenGeometryService CreateGeometryService(VideoScreen screen)
+        {
+            return new VideoScreenGeometryService(
+                screen,
+                () => CurrentMedia,
+                () => UseHardwareDecoding,
+                GetManualGeometryOverride,
+                () => CurrentVideoScaleMode,
+                () => CurrentVideoAspectRatio);
+        }
+
+        private IEnumerator RebuildGeometryAndSubtitleSurface(VlcVideoSize videoSize)
+        {
+            CancelNativeSubtitleSurfaceCoroutine();
+            _currentGeometrySelection = ResolveRequestedGeometry();
+            VideoSurfaceSpec videoSpec = CreateVideoSurfaceSpec(videoSize, _currentGeometrySelection);
+            bool shouldRebuildVideoSurface = ShouldRebuildVideoSurface(videoSpec);
+            if (shouldRebuildVideoSurface)
+            {
+                if (_videoSurfaceBoundToVlc)
+                {
+                    VlcPlaybackBridge.DetachSurface();
+                    _videoSurfaceBoundToVlc = false;
+                }
+
+                _geometryService.Rebuild(videoSize);
+            }
+            else
+            {
+                Debug.Log(
+                    $"[PlaybackService] Video surface rebuild skipped: content={videoSpec.ContentWidth}x{videoSpec.ContentHeight}, " +
+                    $"projection={videoSpec.Projection}, stereo={videoSpec.Stereo}, curve={videoSpec.CurveMode}");
+            }
+
+            VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+            bool shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec, out _);
+
+            yield return WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface);
+
+            BindVideoSurface(videoSpec);
+            if (shouldBindSubtitleSurface)
+                BindSubtitleSurface(subtitleSpec);
+
+            _geometryBindingCoroutine = null;
+        }
+
+        private IEnumerator WaitForVideoAndSubtitleSurfaces(bool shouldWaitForVideoSurface, bool shouldBindSubtitleSurface)
+        {
+            const int maxRetries = 50;
+            int retries = 0;
+
+            while (videoScreen != null
+                   && retries < maxRetries
+                   && ((shouldWaitForVideoSurface && !videoScreen.IsHardwareSurfaceReady())
+                       || (shouldBindSubtitleSurface && !videoScreen.IsFlatSubtitleSurfaceReady())))
+            {
+                retries++;
+                if (retries % 10 == 0)
+                {
+                    Debug.Log(
+                        $"[PlaybackService] Waiting for video/subtitle surfaces... retry: {retries}/{maxRetries}, " +
+                        $"videoRequired={shouldWaitForVideoSurface}, videoReady={videoScreen.IsHardwareSurfaceReady()}, " +
+                        $"subtitleRequired={shouldBindSubtitleSurface}, " +
+                        $"subtitleReady={(!shouldBindSubtitleSurface || videoScreen.IsFlatSubtitleSurfaceReady())}");
+                }
+                yield return null;
+            }
+
+            if (videoScreen == null)
+                yield break;
+
+            if (shouldWaitForVideoSurface && !videoScreen.IsHardwareSurfaceReady())
+                Debug.LogError($"[PlaybackService] Video surface is not ready after parallel wait. retries={retries}");
+
+            if (shouldBindSubtitleSurface && !videoScreen.IsFlatSubtitleSurfaceReady())
+                Debug.LogError($"[PlaybackService] Subtitle surface is not ready after parallel wait. retries={retries}");
+        }
+
+        private void BindVideoSurface(VideoSurfaceSpec videoSpec)
+        {
+            if (videoScreen == null)
+                return;
+
+            IntPtr videoSurfacePtr = videoScreen.GetHardwareSurfaceHandle();
+            if (videoSurfacePtr == IntPtr.Zero)
+            {
+                Debug.LogError("[PlaybackService] Skipping VLC surface bind because video surface is not ready.");
+                return;
+            }
+
+            VlcPlaybackBridge.SetSurface(videoSurfacePtr);
+            _boundVideoSurfaceSpec = videoSpec;
+            _videoSurfaceBoundToVlc = true;
+            Debug.Log($"[PlaybackService] Bound video surface: surface={videoSurfacePtr}, content={videoSpec.ContentWidth}x{videoSpec.ContentHeight}, projection={videoSpec.Projection}");
+        }
+
+        private void BindSubtitleSurface(SubtitleSurfaceSpec subtitleSpec)
+        {
+            if (videoScreen == null)
+                return;
+
+            if (_subtitleSurfaceBoundToVlc
+                && _boundSubtitleSurfaceSpec.HasValue
+                && _boundSubtitleSurfaceSpec.Value.Equals(subtitleSpec)
+                && videoScreen.IsFlatSubtitleSurfaceReady())
+            {
+                Debug.Log($"[PlaybackService] Subtitle surface bind skipped; current spec already bound: surface={videoScreen.GetFlatSubtitleSurfaceHandle()}");
+                return;
+            }
+
+            IntPtr subtitleSurfacePtr = videoScreen.GetFlatSubtitleSurfaceHandle();
+            if (subtitleSurfacePtr == IntPtr.Zero)
+            {
+                Debug.LogError("[PlaybackService] Subtitle surface was requested but is not ready.");
+                DisableAndDetachSubtitleSurface(false);
+                return;
+            }
+
+            VlcPlaybackBridge.SetSubtitleSurface(subtitleSurfacePtr);
+            VlcPlaybackBridge.SetSubtitleSurfaceEnabled(true);
+            _boundSubtitleSurfaceSpec = subtitleSpec;
+            _subtitleSurfaceBoundToVlc = true;
+            Debug.Log($"[PlaybackService] Bound subtitle surface: surface={subtitleSurfacePtr}, mode={subtitleSpec.RenderMode}, content={subtitleSpec.ContentWidth}x{subtitleSpec.ContentHeight}");
+        }
+
+        private void SetCurrentVideoSize(VlcVideoSize videoSize)
+        {
+            _currentWidth = videoSize.Width;
+            _currentHeight = videoSize.Height;
+            _currentVisibleWidth = videoSize.VisibleWidth;
+            _currentVisibleHeight = videoSize.VisibleHeight;
         }
 
         private VideoGeometrySelection? GetManualGeometryOverride()
@@ -230,10 +406,7 @@ namespace XRVLC.Media
                 case "Playing": HandleStatusChanged(PlayerStatus.Playing); break;
                 case "Paused": HandleStatusChanged(PlayerStatus.Paused); break;
                 case "Stopped": HandleStatusChanged(PlayerStatus.Stopped); break;
-                case "Ended":
-                    HandleStatusChanged(PlayerStatus.Ended);
-                    ClearSubtitleCue();
-                    break;
+                case "Ended": HandleStatusChanged(PlayerStatus.Ended); break;
                 case "Error":
                     HandleStatusChanged(PlayerStatus.Error);
                     OnError?.Invoke("AAR PlaybackService reported Error");
@@ -256,49 +429,79 @@ namespace XRVLC.Media
 
         private void HandleBuffering(float buffering)
         {
+            if (CurrentStatus == PlayerStatus.Paused)
+                return;
+
+            OnBuffering?.Invoke(buffering);
+
             if (buffering < 100f) HandleStatusChanged(PlayerStatus.Buffering);
             else HandleStatusChanged(PlayerStatus.Playing);
         }
 
         private void HandleAudioTracksChanged(List<TrackInfo> tracks)
         {
-            OnAudioTracksChanged?.Invoke(tracks);
+            OnAudioTracksChanged?.Invoke(null);
         }
 
         private void HandleSubtitleTracksChanged(List<TrackInfo> tracks)
         {
-            _trackSelectionService.UpdateSubtitleTracks(tracks);
-            OnSubtitleTracksChanged?.Invoke(tracks);
-        }
-
-        private void HandleSubtitleCue(SubtitleCue cue)
-        {
-            OnSubtitleCue?.Invoke(cue ?? SubtitleCue.Clear());
-        }
-
-        private void ClearSubtitleCue()
-        {
-            SubtitleCue clearCue = SubtitleCue.Clear();
-            VlcPlaybackEvents.Snapshot.SetSubtitleCue(clearCue);
-            OnSubtitleCue?.Invoke(clearCue);
+            OnSubtitleTracksChanged?.Invoke(null);
         }
 
         private void StopInternal()
         {
             _currentWidth = 0;
             _currentHeight = 0;
+            _currentVisibleWidth = 0;
+            _currentVisibleHeight = 0;
             _isShortcutFastRate = false;
-            ClearSubtitleCue();
+            VlcPlaybackBridge.PublishPlaybackRate(1f);
             
+            DisableAndDetachSubtitleSurface(false);
             VlcPlaybackBridge.Stop();
             VlcPlaybackBridge.DetachSurface();
+            _videoSurfaceBoundToVlc = false;
+            _boundVideoSurfaceSpec = null;
 
             if (videoScreen != null)
             {
+                videoScreen.DestroyFlatSubtitleLayer();
                 videoScreen.DestroyLayer();
             }
 
             HandleStatusChanged(PlayerStatus.Stopped);
+        }
+
+        private void ClearPlaybackSurfaceForMediaSwitch()
+        {
+            Debug.Log("[PlaybackService] Clearing Unity playback surfaces before media switch.");
+            ClearPendingSurfaceBindingCoroutines();
+            _currentWidth = 0;
+            _currentHeight = 0;
+            _currentVisibleWidth = 0;
+            _currentVisibleHeight = 0;
+
+            DisableAndDetachSubtitleSurface(false);
+            VlcPlaybackBridge.DetachSurface();
+            _videoSurfaceBoundToVlc = false;
+            _boundVideoSurfaceSpec = null;
+
+            if (videoScreen != null)
+            {
+                videoScreen.DestroyFlatSubtitleLayer();
+                videoScreen.DestroyLayer();
+            }
+        }
+
+        private void ClearPendingSurfaceBindingCoroutines()
+        {
+            if (_geometryBindingCoroutine != null)
+            {
+                StopCoroutine(_geometryBindingCoroutine);
+                _geometryBindingCoroutine = null;
+            }
+
+            CancelNativeSubtitleSurfaceCoroutine();
         }
 
         // --------------------------------------------------------
@@ -309,27 +512,22 @@ namespace XRVLC.Media
             videoScreen = screen;
             if (videoScreen != null)
             {
-                _geometryService = new VideoScreenGeometryService(videoScreen, () => CurrentMedia, () => UseHardwareDecoding, GetManualGeometryOverride);
+                videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
+                _geometryService = CreateGeometryService(videoScreen);
                 videoScreen.RebuildLayer(UseHardwareDecoding);
+                _boundVideoSurfaceSpec = null;
+                _videoSurfaceBoundToVlc = false;
             }
         }
 
         public void DetachVideoScreen()
         {
+            DisableAndDetachSubtitleSurface(false);
+            videoScreen?.DestroyFlatSubtitleLayer();
             videoScreen = null;
             _geometryService = null;
-        }
-
-        public void OnXRFocusChanged(bool hasFocus)
-        {
-            if (!hasFocus && CurrentStatus == PlayerStatus.Playing)
-            {
-                Pause();
-            }
-            else if (hasFocus && CurrentStatus == PlayerStatus.Paused)
-            {
-                Play();
-            }
+            _boundVideoSurfaceSpec = null;
+            _videoSurfaceBoundToVlc = false;
         }
 
         // --------------------------------------------------------
@@ -341,7 +539,6 @@ namespace XRVLC.Media
             VlcPlaybackEvents.Snapshot.CurrentMedia = item;
             _hasManualGeometryOverride = false;
             _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
-            ClearSubtitleCue();
             ResetShortcutPlaybackState(item);
             OnMediaChanged?.Invoke(item, 0); // Position is not accurate but UI doesn't strictly need it
 
@@ -385,7 +582,6 @@ namespace XRVLC.Media
 
         public void SeekTo(long timeMs)
         {
-            ClearSubtitleCue();
             VlcPlaybackBridge.SetTime(timeMs);
         }
 
@@ -400,7 +596,6 @@ namespace XRVLC.Media
 
         public void SeekToPosition(float position)
         {
-            ClearSubtitleCue();
             VlcPlaybackBridge.Seek(position);
         }
 
@@ -444,6 +639,22 @@ namespace XRVLC.Media
             videoScreen?.ResetTransformToDefault();
         }
 
+        public void SetVideoScaleMode(VideoScaleMode mode)
+        {
+            CurrentVideoScaleMode = mode;
+            PlaybackUiSettingsService.SaveVideoScaleMode(mode);
+            VlcPlaybackBridge.SetVideoScaleOrdinal(PlaybackUiSettingsService.ToLegacyScaleOrdinal(mode));
+            videoScreen?.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
+        }
+
+        public void SetVideoAspectRatio(VideoAspectRatio aspectRatio)
+        {
+            CurrentVideoScaleMode = VideoScaleMode.Fit;
+            CurrentVideoAspectRatio = aspectRatio;
+            PlaybackUiSettingsService.SaveVideoAspectRatio(aspectRatio);
+            videoScreen?.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
+        }
+
         public void SetManualVideoGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
         {
             if (projection != VideoProjection.Cylinder)
@@ -458,11 +669,11 @@ namespace XRVLC.Media
             if (videoScreen == null)
                 return;
 
-            if (_currentWidth > 0 && _currentHeight > 0)
+            if (CurrentVideoSize.IsValid)
             {
                 if (ShouldRebuildForManualGeometryChange(previousGeometry, nextGeometry))
                 {
-                    RebuildAndApplyGeometry((uint)_currentWidth, (uint)_currentHeight);
+                    RebuildAndApplyGeometry(CurrentVideoSize);
                     return;
                 }
 
@@ -477,7 +688,7 @@ namespace XRVLC.Media
         private void ApplyManualGeometryWithoutRebuild(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
         {
             videoScreen.SetGeometry(projection, stereo, curveMode);
-            videoScreen.FitVideoSize((uint)_currentWidth, (uint)_currentHeight);
+            videoScreen.FitVideoSize((uint)CurrentVideoSize.ContentWidth, (uint)CurrentVideoSize.ContentHeight);
             _currentGeometrySelection = new VideoGeometrySelection(projection, stereo, curveMode);
         }
 
@@ -528,8 +739,10 @@ namespace XRVLC.Media
         /// </summary>
         public void SetPlaybackRate(float rate)
         {
+            rate = NormalizePlaybackRate(rate);
             _isShortcutFastRate = Mathf.Approximately(rate, ShortcutFastRate);
             VlcPlaybackBridge.SetRate(rate);
+            VlcPlaybackBridge.PublishPlaybackRate(rate);
         }
 
         /// <summary>
@@ -548,29 +761,268 @@ namespace XRVLC.Media
             SetPlaybackRate(held ? ShortcutFastRate : 1f);
         }
 
-        public void SetAudioTrack(string trackId)
+        public TrackSnapshot GetTrackSnapshotFromVlc()
         {
-            VlcPlaybackBridge.SetAudioTrack(trackId);
-            if (CurrentMedia != null) CurrentMedia.AudioTrack = trackId;
+            return VlcPlaybackBridge.GetTrackSnapshot();
         }
 
-        public void SetSubtitleTrack(string trackId)
+        public TrackSnapshot GetAudioTrackSnapshotFromVlc()
         {
-            ClearSubtitleCue();
-            VlcPlaybackBridge.SetSpuTrack(trackId);
-            if (CurrentMedia != null) CurrentMedia.SpuTrack = trackId;
+            return VlcPlaybackBridge.GetAudioTrackSnapshot();
+        }
+
+        public TrackSnapshot GetSubtitleTrackSnapshotFromVlc()
+        {
+            return VlcPlaybackBridge.GetSubtitleTrackSnapshot();
+        }
+
+        public TrackSnapshot SetAudioTrack(string trackId)
+        {
+            return VlcPlaybackBridge.SetAudioTrackAndGetSnapshot(trackId);
+        }
+
+        public TrackSnapshot SetSubtitleTrack(string trackId)
+        {
+            return VlcPlaybackBridge.SetSpuTrackAndGetSnapshot(trackId);
         }
 
         public void SetSubtitleRenderMode(SubtitleRenderMode mode)
         {
             SubtitleRenderMode = mode;
-            ClearSubtitleCue();
             VlcPlaybackBridge.SetSubtitleRenderMode(mode);
+            UpdateNativeSubtitleSurfaceBinding();
 
-            if (mode == SubtitleRenderMode.Off && CurrentMedia != null)
+        }
+
+        private void UpdateNativeSubtitleSurfaceBinding()
+        {
+            Debug.Log(
+                $"[PlaybackService] Flat subtitle surface binding requested: mode={SubtitleRenderMode}, " +
+                $"projection={CurrentGeometrySelection.Projection}, rawSize={_currentWidth}x{_currentHeight}, contentSize={CurrentVideoSize.ContentWidth}x{CurrentVideoSize.ContentHeight}, " +
+                $"outside={RenderSubtitlesOutsideScreen}, videoScreenNull={videoScreen == null}, media={(CurrentMedia != null ? CurrentMedia.Title : "null")}");
+
+            CancelNativeSubtitleSurfaceCoroutine();
+            _nativeSubtitleSurfaceCoroutine = StartCoroutine(UpdateNativeSubtitleSurfaceBindingRoutine());
+        }
+
+        private IEnumerator UpdateNativeSubtitleSurfaceBindingRoutine()
+        {
+            Debug.Log("[PlaybackService] Flat subtitle surface binding start");
+            VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+            bool shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec, out _);
+            if (!shouldBindSubtitleSurface)
             {
-                CurrentMedia.SpuTrack = DisabledSubtitleTrack;
+                _nativeSubtitleSurfaceCoroutine = null;
+                yield break;
             }
+
+            yield return WaitForSubtitleSurfaceReady();
+
+            BindSubtitleSurface(subtitleSpec);
+            _nativeSubtitleSurfaceCoroutine = null;
+        }
+
+        private bool BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec, out bool rebuiltSurface)
+        {
+            subtitleSpec = default(SubtitleSurfaceSpec);
+            rebuiltSurface = false;
+            bool usesFlatSubtitleSurface = TryCreateSubtitleSurfaceSpec(out subtitleSpec);
+
+            Debug.Log(
+                $"[PlaybackService] Flat subtitle surface binding state: renderModeAllowed={UsesFlatSubtitleSurfaceMode(SubtitleRenderMode)}, " +
+                $"usesFlatSubtitleSurface={usesFlatSubtitleSurface}, outside={RenderSubtitlesOutsideScreen}, " +
+                $"videoScreenNull={videoScreen == null}, projection={CurrentGeometrySelection.Projection}, rawSize={_currentWidth}x{_currentHeight}, contentSize={CurrentVideoSize.ContentWidth}x{CurrentVideoSize.ContentHeight}");
+
+            if (videoScreen == null
+                || !usesFlatSubtitleSurface
+                || !CurrentVideoSize.IsValid)
+            {
+                Debug.LogWarning(
+                    $"[PlaybackService] Flat subtitle surface binding skipped: videoScreenNull={videoScreen == null}, " +
+                    $"usesFlatSubtitleSurface={usesFlatSubtitleSurface}, mode={SubtitleRenderMode}, " +
+                    $"projection={CurrentGeometrySelection.Projection}, rawSize={_currentWidth}x{_currentHeight}, contentSize={CurrentVideoSize.ContentWidth}x{CurrentVideoSize.ContentHeight}");
+                DisableAndDetachSubtitleSurface(false);
+                videoScreen?.DestroyFlatSubtitleLayer();
+                return false;
+            }
+
+            if (IsSubtitleSurfaceCurrent(subtitleSpec))
+            {
+                Debug.Log(
+                    $"[PlaybackService] Flat subtitle layer rebuild skipped: surfaceSize={subtitleSpec.SurfaceWidth}x{subtitleSpec.SurfaceHeight}, " +
+                    $"contentSize={subtitleSpec.ContentWidth}x{subtitleSpec.ContentHeight}, mode={subtitleSpec.RenderMode}, outside={subtitleSpec.RenderOutsideScreen}");
+                return true;
+            }
+
+            VlcPlaybackBridge.SetSubtitleSurfaceEnabled(false);
+            VlcPlaybackBridge.DetachSubtitleSurface();
+            _subtitleSurfaceBoundToVlc = false;
+            _boundSubtitleSurfaceSpec = null;
+            Debug.Log(
+                $"[PlaybackService] Flat subtitle layer rebuild requested: rawSize={_currentWidth}x{_currentHeight}, contentSize={CurrentVideoSize.ContentWidth}x{CurrentVideoSize.ContentHeight}, " +
+                $"mode={SubtitleRenderMode}, projection={CurrentGeometrySelection.Projection}, outside={RenderSubtitlesOutsideScreen}");
+
+            if (!videoScreen.RebuildFlatSubtitleLayer(
+                    subtitleSpec.SurfaceWidth,
+                    subtitleSpec.SurfaceHeight,
+                    subtitleSpec.ContentWidth,
+                    subtitleSpec.ContentHeight,
+                    subtitleSpec.RenderOutsideScreen))
+            {
+                Debug.LogError(
+                    $"[PlaybackService] Flat subtitle layer rebuild failed: mode={SubtitleRenderMode}, " +
+                    $"projection={CurrentGeometrySelection.Projection}, size={subtitleSpec.SurfaceWidth}x{subtitleSpec.SurfaceHeight}, " +
+                    $"outside={RenderSubtitlesOutsideScreen}");
+                return false;
+            }
+
+            rebuiltSurface = true;
+            return true;
+        }
+
+        private IEnumerator WaitForSubtitleSurfaceReady()
+        {
+            const int maxRetries = 50;
+            int retries = 0;
+            while (videoScreen != null && !videoScreen.IsFlatSubtitleSurfaceReady() && retries < maxRetries)
+            {
+                retries++;
+                if (retries % 10 == 0)
+                    Debug.Log($"[PlaybackService] Waiting for flat subtitle surface... retry: {retries}/{maxRetries}");
+                yield return null;
+            }
+
+            if (videoScreen == null || !videoScreen.IsFlatSubtitleSurfaceReady())
+                Debug.LogError($"[PlaybackService] Flat subtitle overlay surface is not ready. retries={retries}");
+        }
+
+        private void CancelNativeSubtitleSurfaceCoroutine()
+        {
+            if (_nativeSubtitleSurfaceCoroutine == null)
+                return;
+
+            Debug.Log("[PlaybackService] Flat subtitle surface binding: stopping previous binding coroutine");
+            StopCoroutine(_nativeSubtitleSurfaceCoroutine);
+            _nativeSubtitleSurfaceCoroutine = null;
+        }
+
+        private bool TryCreateSubtitleSurfaceSpec(out SubtitleSurfaceSpec spec)
+        {
+            spec = default(SubtitleSurfaceSpec);
+            if (videoScreen == null
+                || !UsesFlatSubtitleSurfaceMode(SubtitleRenderMode)
+                || !CurrentVideoSize.IsValid)
+                return false;
+
+            uint contentWidth = (uint)CurrentVideoSize.ContentWidth;
+            uint contentHeight = (uint)CurrentVideoSize.ContentHeight;
+            uint surfaceWidth = contentWidth;
+            uint surfaceHeight = UsesSingleHeightSubtitleSurface()
+                ? contentHeight
+                : contentHeight * 2u;
+
+            spec = new SubtitleSurfaceSpec(
+                surfaceWidth,
+                surfaceHeight,
+                contentWidth,
+                contentHeight,
+                CurrentGeometrySelection.Stereo,
+                RenderSubtitlesOutsideScreen,
+                ShouldStackSubtitlesOutside(),
+                SubtitleRenderMode);
+            return true;
+        }
+
+        private bool ShouldRebuildVideoSurface(VideoSurfaceSpec spec)
+        {
+            return !IsVideoSurfaceCurrent(spec);
+        }
+
+        private bool IsVideoSurfaceCurrent(VideoSurfaceSpec spec)
+        {
+            return videoScreen != null
+                && videoScreen.IsHardwareSurfaceReady()
+                && _boundVideoSurfaceSpec.HasValue
+                && _boundVideoSurfaceSpec.Value.Equals(spec);
+        }
+
+        private bool IsSubtitleSurfaceCurrent(SubtitleSurfaceSpec spec)
+        {
+            return videoScreen != null
+                && videoScreen.IsFlatSubtitleSurfaceReady()
+                && _boundSubtitleSurfaceSpec.HasValue
+                && _boundSubtitleSurfaceSpec.Value.Equals(spec);
+        }
+
+        private VideoSurfaceSpec CreateVideoSurfaceSpec(VlcVideoSize videoSize, VideoGeometrySelection geometry)
+        {
+            return new VideoSurfaceSpec(
+                (uint)videoSize.ContentWidth,
+                (uint)videoSize.ContentHeight,
+                geometry.Projection,
+                geometry.Stereo,
+                geometry.CurveMode,
+                UseHardwareDecoding);
+        }
+
+        private void DisableAndDetachSubtitleSurface(bool destroyLayer)
+        {
+            VlcPlaybackBridge.SetSubtitleSurfaceEnabled(false);
+            VlcPlaybackBridge.DetachSubtitleSurface();
+            _subtitleSurfaceBoundToVlc = false;
+            _boundSubtitleSurfaceSpec = null;
+            if (destroyLayer)
+                videoScreen?.DestroyFlatSubtitleLayer();
+        }
+
+        private static bool HasSameContentDimensions(VlcVideoSize a, VlcVideoSize b)
+        {
+            return a.ContentWidth == b.ContentWidth
+                && a.ContentHeight == b.ContentHeight;
+        }
+
+        private static bool HasSameGeometry(VideoGeometrySelection a, VideoGeometrySelection b)
+        {
+            return a.Projection == b.Projection
+                && a.Stereo == b.Stereo
+                && a.CurveMode == b.CurveMode;
+        }
+
+        private static bool UsesFlatSubtitleSurfaceMode(SubtitleRenderMode mode)
+        {
+            return mode == SubtitleRenderMode.Spatial;
+        }
+
+        private bool UsesSingleHeightSubtitleSurface()
+        {
+            return (CurrentGeometrySelection.Projection == VideoProjection.Flat
+                    || CurrentGeometrySelection.Projection == VideoProjection.Cylinder)
+                && !RenderSubtitlesOutsideScreen;
+        }
+
+        private bool ShouldStackSubtitlesOutside()
+        {
+            if (IsImmersiveProjection(CurrentGeometrySelection.Projection))
+                return true;
+            return RenderSubtitlesOutsideScreen;
+        }
+
+        private static bool IsImmersiveProjection(VideoProjection projection)
+        {
+            return projection == VideoProjection.Sphere360 || projection == VideoProjection.Sphere180;
+        }
+
+        public void SetRenderSubtitlesOutsideScreen(bool enabled)
+        {
+            if (RenderSubtitlesOutsideScreen == enabled)
+            {
+                VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+                return;
+            }
+
+            RenderSubtitlesOutsideScreen = enabled;
+            VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+            UpdateNativeSubtitleSurfaceBinding();
         }
 
         public void ToggleSubtitleRenderMode()
@@ -590,7 +1042,8 @@ namespace XRVLC.Media
         /// </summary>
         public void ToggleSubtitleTrack()
         {
-            string currentTrack = CurrentMedia?.SpuTrack ?? DisabledSubtitleTrack;
+            TrackSnapshot snapshot = GetSubtitleTrackSnapshotFromVlc();
+            string currentTrack = FindSelectedTrackId(snapshot.SubtitleTracks, DisabledSubtitleTrack);
             bool subtitleEnabled = currentTrack != DisabledSubtitleTrack;
 
             if (subtitleEnabled)
@@ -600,7 +1053,7 @@ namespace XRVLC.Media
                 return;
             }
 
-            string trackToRestore = FindRestorableSubtitleTrack();
+            string trackToRestore = FindRestorableSubtitleTrack(snapshot.SubtitleTracks);
             if (trackToRestore != DisabledSubtitleTrack)
                 SetSubtitleTrack(trackToRestore);
         }
@@ -611,18 +1064,131 @@ namespace XRVLC.Media
         private void ResetShortcutPlaybackState(MediaWrapper media)
         {
             _isShortcutFastRate = false;
+            VlcPlaybackBridge.PublishPlaybackRate(1f);
             _trackSelectionService.Reset(media);
+        }
+
+        private static float NormalizePlaybackRate(float rate)
+        {
+            return float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f ? 1f : rate;
+        }
+
+        public void SetSubtitleDelaySeconds(float seconds)
+        {
+            if (float.IsNaN(seconds) || float.IsInfinity(seconds))
+                seconds = 0f;
+
+            float snapped = Mathf.Round(seconds * 2f) * 0.5f;
+            SubtitleDelaySeconds = snapped;
+            VlcPlaybackBridge.SetSubtitleDelayMicroseconds((long)(snapped * 1000000f));
         }
 
         /// <summary>
         /// 优先恢复关闭前的字幕轨；如果不可用，则选择第一个有效字幕轨。
         /// </summary>
-        private string FindRestorableSubtitleTrack()
+        private string FindRestorableSubtitleTrack(List<TrackInfo> tracks)
         {
-            return _trackSelectionService.FindRestorableSubtitleTrack();
+            return _trackSelectionService.FindRestorableSubtitleTrack(tracks);
         }
 
-        public void SetAudioDelay(long delayMs) { /* 需要 AAR 支持 */ }
-        public void SetSubtitleDelay(long delayMs) { /* 需要 AAR 支持 */ }
+        private static string FindSelectedTrackId(List<TrackInfo> tracks, string fallback)
+        {
+            if (tracks == null)
+                return fallback;
+
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                if (tracks[i].IsSelected)
+                    return tracks[i].Id;
+            }
+
+            return fallback;
+        }
+
+        public void SetAudioDelay(long delayMs) { /* Audio delay is not exposed in the Unity settings surface. */ }
+        public void SetSubtitleDelay(long delayMs)
+        {
+            SetSubtitleDelaySeconds(delayMs / 1000f);
+        }
+
+        private readonly struct VideoSurfaceSpec : IEquatable<VideoSurfaceSpec>
+        {
+            public VideoSurfaceSpec(
+                uint contentWidth,
+                uint contentHeight,
+                VideoProjection projection,
+                StereoMode stereo,
+                FlatVideoCurveMode curveMode,
+                bool hardwareDecoding)
+            {
+                ContentWidth = contentWidth;
+                ContentHeight = contentHeight;
+                Projection = projection;
+                Stereo = stereo;
+                CurveMode = curveMode;
+                HardwareDecoding = hardwareDecoding;
+            }
+
+            public uint ContentWidth { get; }
+            public uint ContentHeight { get; }
+            public VideoProjection Projection { get; }
+            public StereoMode Stereo { get; }
+            public FlatVideoCurveMode CurveMode { get; }
+            public bool HardwareDecoding { get; }
+
+            public bool Equals(VideoSurfaceSpec other)
+            {
+                return ContentWidth == other.ContentWidth
+                    && ContentHeight == other.ContentHeight
+                    && Projection == other.Projection
+                    && Stereo == other.Stereo
+                    && CurveMode == other.CurveMode
+                    && HardwareDecoding == other.HardwareDecoding;
+            }
+        }
+
+        private readonly struct SubtitleSurfaceSpec : IEquatable<SubtitleSurfaceSpec>
+        {
+            public SubtitleSurfaceSpec(
+                uint surfaceWidth,
+                uint surfaceHeight,
+                uint contentWidth,
+                uint contentHeight,
+                StereoMode stereo,
+                bool renderOutsideScreen,
+                bool stackOutside,
+                SubtitleRenderMode renderMode)
+            {
+                SurfaceWidth = surfaceWidth;
+                SurfaceHeight = surfaceHeight;
+                ContentWidth = contentWidth;
+                ContentHeight = contentHeight;
+                Stereo = stereo;
+                RenderOutsideScreen = renderOutsideScreen;
+                StackOutside = stackOutside;
+                RenderMode = renderMode;
+            }
+
+            public uint SurfaceWidth { get; }
+            public uint SurfaceHeight { get; }
+            public uint ContentWidth { get; }
+            public uint ContentHeight { get; }
+            public StereoMode Stereo { get; }
+            public bool RenderOutsideScreen { get; }
+            public bool StackOutside { get; }
+            public SubtitleRenderMode RenderMode { get; }
+
+            public bool Equals(SubtitleSurfaceSpec other)
+            {
+                return SurfaceWidth == other.SurfaceWidth
+                    && SurfaceHeight == other.SurfaceHeight
+                    && ContentWidth == other.ContentWidth
+                    && ContentHeight == other.ContentHeight
+                    && Stereo == other.Stereo
+                    && RenderOutsideScreen == other.RenderOutsideScreen
+                    && StackOutside == other.StackOutside
+                    && RenderMode == other.RenderMode;
+            }
+        }
     }
 }

@@ -17,6 +17,5 @@ namespace XRVLC.Media
 
         event Action<List<TrackInfo>> OnAudioTracksChanged;
         event Action<List<TrackInfo>> OnSubtitleTracksChanged;
-        event Action<SubtitleCue> OnSubtitleCue;
     }
 }

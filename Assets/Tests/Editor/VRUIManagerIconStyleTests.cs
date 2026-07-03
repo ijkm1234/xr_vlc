@@ -32,7 +32,8 @@ namespace XRVLC.Tests
             "progress-dot",
             "equalizer",
             "subtitle",
-            "view",
+            "info",
+            "sphere",
             "stereo3d"
         };
 
@@ -139,25 +140,25 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_BindsEyeButtonToPassthroughToggle()
+        public void VRUIManager_BindsSeeThroughButtonToPassthroughToggle()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
-            StringAssert.Contains("eyeBtn.onClick.AddListener(OnEyeBtnClicked)", source);
-            StringAssert.Contains("eyeBtn.onClick.RemoveListener(OnEyeBtnClicked)", source);
+            StringAssert.Contains("seeThroughBtn.onClick.AddListener(OnSeeThroughBtnClicked)", source);
+            StringAssert.Contains("seeThroughBtn.onClick.RemoveListener(OnSeeThroughBtnClicked)", source);
             StringAssert.Contains("PicoPassthroughModeService", source);
-            StringAssert.Contains("OnEyeBtnClicked", source);
+            StringAssert.Contains("OnSeeThroughBtnClicked", source);
         }
 
         [Test]
-        public void VRUIManager_EyeButtonReflectsPassthroughState()
+        public void VRUIManager_SeeThroughButtonReflectsPassthroughState()
         {
             Type managerType = Type.GetType("VRUIManager, Assembly-CSharp");
             Assert.IsNotNull(managerType, "VRUIManager type should be available in Assembly-CSharp.");
 
             var managerObject = new GameObject("Passthrough Button Manager");
-            var eyeButtonObject = new GameObject(
-                "EyeButton",
+            var seeThroughButtonObject = new GameObject(
+                "SeeThroughButton",
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(UnityEngine.UI.Image),
@@ -166,27 +167,27 @@ namespace XRVLC.Tests
             try
             {
                 Component manager = managerObject.AddComponent(managerType);
-                var eyeButton = eyeButtonObject.GetComponent<UnityEngine.UI.Button>();
-                managerType.GetField("eyeBtn").SetValue(manager, eyeButton);
+                var seeThroughButton = seeThroughButtonObject.GetComponent<UnityEngine.UI.Button>();
+                managerType.GetField("seeThroughBtn").SetValue(manager, seeThroughButton);
 
-                managerType.GetMethod("SetEyeButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
+                managerType.GetMethod("SetSeeThroughButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(manager, new object[] { true, true });
-                Assert.Greater(eyeButtonObject.GetComponent<UnityEngine.UI.Image>().color.a, 0.2f);
-                Assert.IsTrue(eyeButton.interactable);
+                Assert.Greater(seeThroughButtonObject.GetComponent<UnityEngine.UI.Image>().color.a, 0.2f);
+                Assert.IsTrue(seeThroughButton.interactable);
 
-                managerType.GetMethod("SetEyeButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
+                managerType.GetMethod("SetSeeThroughButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(manager, new object[] { false, true });
-                Assert.AreEqual(0f, eyeButtonObject.GetComponent<UnityEngine.UI.Image>().color.a);
-                Assert.IsTrue(eyeButton.interactable);
+                Assert.AreEqual(0f, seeThroughButtonObject.GetComponent<UnityEngine.UI.Image>().color.a);
+                Assert.IsTrue(seeThroughButton.interactable);
 
-                managerType.GetMethod("SetEyeButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
+                managerType.GetMethod("SetSeeThroughButtonPassthroughVisual", BindingFlags.Instance | BindingFlags.NonPublic)
                     .Invoke(manager, new object[] { false, false });
-                Assert.IsFalse(eyeButton.interactable);
+                Assert.IsFalse(seeThroughButton.interactable);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(managerObject);
-                UnityEngine.Object.DestroyImmediate(eyeButtonObject);
+                UnityEngine.Object.DestroyImmediate(seeThroughButtonObject);
             }
         }
 
@@ -611,7 +612,7 @@ namespace XRVLC.Tests
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
             StringAssert.Contains("EnsureRuntimeTextVisible()", source);
-            StringAssert.Contains("titleText.enabled = true", source);
+            StringAssert.Contains("titleScroller.SetText(GetDisplayTitle(media))", source);
             StringAssert.Contains("systemTimeText.enabled = true", source);
             StringAssert.Contains("batteryText.enabled = true", source);
             StringAssert.Contains("currentTimeText.enabled = true", source);
@@ -668,18 +669,23 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_FixesSystemStatusLayoutAndAddsBatteryIcon()
+        public void VRUIManager_OnlyUpdatesInspectorAuthoredBatteryIconAndText()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
             StringAssert.Contains("ConfigureFixedSystemStatusText(systemTimeText, SystemTimeTextWidth)", source);
-            StringAssert.Contains("ConfigureFixedSystemStatusText(batteryText, BatteryStatusTextWidth)", source);
-            StringAssert.Contains("text.enableWordWrapping = false", source);
-            StringAssert.Contains("text.overflowMode = TextOverflowModes.Ellipsis", source);
-            StringAssert.Contains("EnsureBatteryIcon()", source);
+            StringAssert.Contains("public Image batteryIcon", source);
             StringAssert.Contains("ResolveBatteryIconName(batteryPercent)", source);
             StringAssert.Contains("SetBatteryIconSprite(batteryPercent)", source);
-            StringAssert.Contains("batteryText.text = batteryPercent >= 0 ? $\"{batteryPercent}%\" : \"--%\"", source);
+            StringAssert.Contains("LoadIconWithFallback(iconName, BatteryUnknownIcon)", source);
+            StringAssert.Contains("batteryIcon.sprite = sprite", source);
+            StringAssert.DoesNotContain("EnsureBatteryIcon()", source);
+            StringAssert.DoesNotContain("ConfigureBatteryStatusText", source);
+            StringAssert.DoesNotContain("ConfigureBatteryIconLayout", source);
+            StringAssert.DoesNotContain("new GameObject(\"BatteryIcon\"", source);
+            StringAssert.DoesNotContain("batteryText.transform.SetParent", source);
+            StringAssert.DoesNotContain("batteryIcon.transform.SetParent", source);
+            StringAssert.DoesNotContain("GetPaddingCroppedBatterySprite", source);
         }
 
         [Test]
@@ -696,6 +702,8 @@ namespace XRVLC.Tests
             StringAssert.Contains("if (batteryPercent <= 35)", source);
             StringAssert.Contains("if (batteryPercent <= 70)", source);
             StringAssert.Contains("LoadIconWithFallback(iconName, BatteryUnknownIcon)", source);
+            StringAssert.DoesNotContain("BatteryLevelIconCropPaddingPx", source);
+            StringAssert.DoesNotContain("BatteryUnknownIconCropPaddingPx", source);
         }
 
         [Test]
@@ -801,14 +809,76 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void VRUIManager_ShowsLoadingOverlayForOpeningAndBufferingStates()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string startMethod = ExtractMethod(source, "Start", "private void");
+            string destroyMethod = ExtractMethod(source, "OnDestroy", "private void");
+            string statusMethod = ExtractMethod(source, "OnStatusChanged", "private void");
+            string loadingStatusMethod = ExtractMethod(source, "IsLoadingStatus", "private static bool");
+            string bufferingMethod = ExtractMethod(source, "OnBuffering", "private void");
+
+            StringAssert.Contains("playbackService.OnBuffering += OnBuffering", startMethod);
+            StringAssert.Contains("playbackService.OnBuffering -= OnBuffering", destroyMethod);
+            StringAssert.Contains("SetLoadingVisible(IsLoadingStatus(status));", statusMethod);
+            StringAssert.Contains("status == XRVLC.Media.PlayerStatus.Opening", loadingStatusMethod);
+            StringAssert.Contains("status == XRVLC.Media.PlayerStatus.Buffering", loadingStatusMethod);
+            StringAssert.Contains("SetLoadingVisible(buffering < 100f)", bufferingMethod);
+        }
+
+        [Test]
+        public void VRUIManager_UsesEditorCreatedLoadingOverlayWithLoadingIconFallback()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string ensureMethod = ExtractMethod(source, "EnsureLoadingOverlay", "private void");
+            string updateMethod = ExtractMethod(source, "UpdateLoadingAnimation", "private void");
+            string resolveMethod = ExtractMethod(source, "ResolveLoadingOverlayReferences", "private void");
+            string findMethod = ExtractMethod(source, "FindSceneLoadingOverlay", "private static Transform");
+            string spriteMethod = ExtractMethod(source, "LoadLoadingSprite", "private static Sprite");
+
+            StringAssert.Contains("private const string LoadingIconResourceName = \"loading-four\"", source);
+            StringAssert.Contains("[SerializeField] private GameObject loadingOverlay", source);
+            StringAssert.Contains("[SerializeField] private RectTransform loadingSpinnerTransform", source);
+            StringAssert.Contains("[SerializeField] private Image loadingSpinnerImage", source);
+            StringAssert.Contains("ResolveLoadingOverlayReferences();", ensureMethod);
+            StringAssert.DoesNotContain("new GameObject(\"LoadingOverlay\"", ensureMethod);
+            StringAssert.DoesNotContain("GameObject.Find(\"LoadingOverlay\")", resolveMethod);
+            StringAssert.Contains("Resources.FindObjectsOfTypeAll<Transform>()", findMethod);
+            StringAssert.Contains("canvasGroup.blocksRaycasts = false", ensureMethod);
+            StringAssert.Contains("loadingSpinnerImage.raycastTarget = false", ensureMethod);
+            StringAssert.Contains("loadingSpinnerImage.sprite = LoadLoadingSprite()", ensureMethod);
+            StringAssert.Contains("UpdateLoadingOverlayPose();", updateMethod);
+            StringAssert.Contains("loadingSpinnerTransform.Rotate(0f, 0f, LoadingSpinnerDegreesPerSecond * Time.unscaledDeltaTime)", updateMethod);
+            StringAssert.Contains("Resources.Load<Sprite>(IconResourcePath + LoadingIconResourceName)", spriteMethod);
+            StringAssert.Contains("CreateGeneratedLoadingSpinnerSprite()", spriteMethod);
+        }
+
+        [Test]
+        public void VRUIManager_PositionsLoadingOverlayAbovePlaybackPanelFiveMetersFromCamera()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string ensureMethod = ExtractMethod(source, "EnsureLoadingOverlay", "private void");
+            string updateMethod = ExtractMethod(source, "UpdateLoadingAnimation", "private void");
+            string poseMethod = ExtractMethod(source, "UpdateLoadingOverlayPose", "private void");
+
+            StringAssert.Contains("private const float LoadingDistanceFromCameraMeters = 5f", source);
+            StringAssert.Contains("canvas.renderMode = RenderMode.WorldSpace", ensureMethod);
+            StringAssert.Contains("UpdateLoadingOverlayPose();", updateMethod);
+            StringAssert.Contains("GetControlPanelWorldCenter", poseMethod);
+            StringAssert.Contains("cameraTransform.position + direction * LoadingDistanceFromCameraMeters", poseMethod);
+            StringAssert.Contains("loadingOverlay.transform.LookAt(cameraTransform.position)", poseMethod);
+            StringAssert.DoesNotContain("videoScreen", poseMethod);
+        }
+
+        [Test]
         [Ignore("Track dropdowns now use XrDropdown; covered by XrDropdownUnifiedTests.")]
-        public void VRUIManager_HiddenPanelTriggerPressShowsPanelEvenWhenTrackDropdownIsOpen()
+        public void VRUIManager_HiddenPanelTriggerReleaseShowsPanelEvenWhenTrackDropdownIsOpen()
         {
             Type managerType = Type.GetType("VRUIManager, Assembly-CSharp");
             Assert.IsNotNull(managerType, "VRUIManager type should be available in Assembly-CSharp.");
 
-            MethodInfo method = managerType.GetMethod("HandleTriggerPressedEdge", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(method, "VRUIManager should handle a trigger press edge in a testable helper.");
+            MethodInfo method = managerType.GetMethod("HandleTriggerReleasedEdge", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(method, "VRUIManager should handle a trigger release edge in a testable helper.");
 
             Type dropdownType = Type.GetType("TMPro.TMP_Dropdown, Unity.TextMeshPro");
             Assert.IsNotNull(dropdownType, "TMP_Dropdown type should be available for trigger wake tests.");
@@ -847,13 +917,26 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_AutoHideTimerWaitsWhilePointerIsOverManagedUi()
+        public void VRUIManager_AutoHideTimerWaitsWhilePointerIsOverManagedUiOrSecondaryPanelOpen()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
             StringAssert.Contains("IsPointerOverManagedUi()", source);
-            StringAssert.Contains("if (IsPointerOverManagedUi())", source);
+            StringAssert.Contains("IsAnySecondaryPanelOpen()", source);
+            StringAssert.Contains("if (IsPointerOverManagedUi() || IsAnySecondaryPanelOpen())", source);
             StringAssert.Contains("_hideTimer -= Time.deltaTime", source);
+        }
+
+        [Test]
+        public void VRUIManager_TriggerPanelClickRunsOnShortReleaseAndSkipsLongPressRelease()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+
+            StringAssert.Contains("HandleTriggerReleasedEdge()", source);
+            StringAssert.DoesNotContain("HandleTriggerPressedEdge();", source);
+            StringAssert.Contains("XRVLC.ShortcutInputState.TriggerFastRateHoldSeconds", source);
+            StringAssert.Contains("if (!_triggerLongPressReleasePending)", source);
+            StringAssert.Contains("new XrUiEvent(XrUiEventType.TriggerReleased", source);
         }
 
         [Test]
@@ -1213,15 +1296,68 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_TrackDropdownSelectionUsesBridgeSelectedMarkerBeforeFallback()
+        public void VRUIManager_TrackDropdownsUseActiveVlcSnapshotsWithoutLongLivedTrackCache()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
+            StringAssert.Contains("ChooseSubtitleTrackOptionLabel", source);
+            StringAssert.Contains("RefreshAudioTracksDropdownFromVlc()", source);
+            StringAssert.Contains("RefreshSubtitleTracksDropdownFromVlc()", source);
+            StringAssert.Contains("playbackService.GetAudioTrackSnapshotFromVlc()", source);
+            StringAssert.Contains("playbackService.GetSubtitleTrackSnapshotFromVlc()", source);
+            StringAssert.DoesNotContain("playbackService.GetTrackSnapshotFromVlc()", source);
+            StringAssert.Contains("_openAudioTracks", source);
+            StringAssert.Contains("_openSubtitleTracks", source);
+            StringAssert.DoesNotContain("currentAudioTracks", source);
+            StringAssert.DoesNotContain("currentSubtitleTracks", source);
             StringAssert.Contains("ResolveSelectedTrackIndex", source);
             StringAssert.Contains("tracks[i].IsSelected", source);
-            StringAssert.Contains("preferFirstEnabledWhenDisabled", source);
-            StringAssert.Contains("ResolveSelectedTrackIndex(tracks, playbackService?.CurrentMedia?.AudioTrack, true)", source);
-            StringAssert.Contains("ResolveSelectedTrackIndex(tracks, playbackService?.CurrentMedia?.SpuTrack, false)", source);
+            StringAssert.DoesNotContain("playbackService?.CurrentMedia?.AudioTrack", source);
+            StringAssert.DoesNotContain("playbackService?.CurrentMedia?.SpuTrack", source);
+            StringAssert.Contains("playbackService?.SetAudioTrack(_openAudioTracks[dropdownIndex].Id)", source);
+            StringAssert.Contains("playbackService?.SetSubtitleTrack(_openSubtitleTracks[trackIndex].Id)", source);
+
+            string audioRefresh = ExtractMethodBody(source, "private void RefreshAudioTracksDropdownFromVlc()");
+            StringAssert.Contains("playbackService.GetAudioTrackSnapshotFromVlc()", audioRefresh);
+            StringAssert.DoesNotContain("GetSubtitleTrackSnapshotFromVlc", audioRefresh);
+
+            string subtitleRefresh = ExtractMethodBody(source, "private void RefreshSubtitleTracksDropdownFromVlc()");
+            StringAssert.Contains("playbackService.GetSubtitleTrackSnapshotFromVlc()", subtitleRefresh);
+            StringAssert.DoesNotContain("GetAudioTrackSnapshotFromVlc", subtitleRefresh);
+
+            int chooseBranchStart = source.IndexOf("if (dropdownIndex == 0)", System.StringComparison.Ordinal);
+            int chooseBranchEnd = source.IndexOf("int trackIndex = dropdownIndex - 1", chooseBranchStart, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(chooseBranchStart, 0);
+            Assert.Greater(chooseBranchEnd, chooseBranchStart);
+            string chooseBranch = source.Substring(chooseBranchStart, chooseBranchEnd - chooseBranchStart);
+            StringAssert.Contains("VlcPlaybackBridge.OpenSubtitlePicker()", chooseBranch);
+            StringAssert.DoesNotContain("SetSubtitleTrack", chooseBranch);
+        }
+
+        [Test]
+        public void VRUIManager_TrackButtonsRefreshBeforeCheckingDropdownInteractable()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+
+            string audioClick = ExtractMethodBody(source, "private void OnAudioTrackBtnClicked()");
+            int audioRefreshIndex = audioClick.IndexOf("RefreshAudioTracksDropdownFromVlc()", StringComparison.Ordinal);
+            int audioShowCheckIndex = audioClick.IndexOf("ShouldShowTrackDropdown(audioTrackDropdown)", StringComparison.Ordinal);
+            Assert.GreaterOrEqual(audioRefreshIndex, 0, "Audio button should refresh tracks from VLC before opening.");
+            Assert.GreaterOrEqual(audioShowCheckIndex, 0, "Audio button should still use the shared show predicate.");
+            Assert.Less(
+                audioRefreshIndex,
+                audioShowCheckIndex,
+                "Audio dropdown must query VLC before checking interactable; placeholder dropdowns start non-interactable.");
+
+            string subtitleClick = ExtractMethodBody(source, "private void OnSubtitleBtnClicked()");
+            int subtitleRefreshIndex = subtitleClick.IndexOf("RefreshSubtitleTracksDropdownFromVlc()", StringComparison.Ordinal);
+            int subtitleShowCheckIndex = subtitleClick.IndexOf("ShouldShowTrackDropdown(subtitleTrackDropdown)", StringComparison.Ordinal);
+            Assert.GreaterOrEqual(subtitleRefreshIndex, 0, "Subtitle button should refresh tracks from VLC before opening.");
+            Assert.GreaterOrEqual(subtitleShowCheckIndex, 0, "Subtitle button should still use the shared show predicate.");
+            Assert.Less(
+                subtitleRefreshIndex,
+                subtitleShowCheckIndex,
+                "Subtitle dropdown must query VLC before checking interactable; placeholder dropdowns start non-interactable.");
         }
 
         [Test]
@@ -1514,10 +1650,16 @@ namespace XRVLC.Tests
             StringAssert.Contains("音频", source);
             StringAssert.Contains("ShortcutSettingsService.LoadShortcutMappings", source);
             StringAssert.Contains("ShortcutSettingsService.SaveShortcutMappings", source);
+            StringAssert.Contains("CreatePlaybackRateStepper(root.transform)", source);
+            StringAssert.Contains("UpdatePlaybackRateControl()", source);
+            StringAssert.DoesNotContain("CreateButton(row, \"0.5x\"", source);
+            StringAssert.DoesNotContain("CreateGestureSaveRow", source);
+            StringAssert.DoesNotContain("保存手势设置", source);
             StringAssert.Contains("SubtitleRenderMode.Native", source);
             StringAssert.Contains("SubtitleRenderMode.Spatial", source);
-            StringAssert.Contains("SubtitleRenderMode.Off", source);
-            StringAssert.Contains("VlcPlaybackBridge.SetVideoScaleOrdinal", source);
+            StringAssert.DoesNotContain("SubtitleRenderMode.Off", source);
+            StringAssert.Contains("ApplyVideoAspectRatio", source);
+            StringAssert.DoesNotContain("ApplyVideoScaleMode", source);
             StringAssert.Contains("VlcPlaybackBridge.SetAudioChannelMode", source);
             StringAssert.DoesNotContain("PlaybackUiSettingsService.SaveSubtitleRenderMode", source);
             StringAssert.DoesNotContain("PlaybackUiSettingsService.SaveAudioChannelMode", source);
@@ -1525,6 +1667,39 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("360全景", source);
             StringAssert.DoesNotContain("上下3D", source);
             StringAssert.DoesNotContain("左右3D", source);
+
+            int playbackStart = source.IndexOf("private void BuildPlaybackTab", System.StringComparison.Ordinal);
+            int gestureStart = source.IndexOf("private void BuildGestureTab", playbackStart, System.StringComparison.Ordinal);
+            int subtitleStart = source.IndexOf("private void BuildSubtitleTab", System.StringComparison.Ordinal);
+            int videoStart = source.IndexOf("private void BuildVideoTab", subtitleStart, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(playbackStart, 0);
+            Assert.Greater(gestureStart, playbackStart);
+            Assert.GreaterOrEqual(subtitleStart, 0);
+            Assert.Greater(videoStart, subtitleStart);
+
+            string playbackBlock = source.Substring(playbackStart, gestureStart - playbackStart);
+            string subtitleBlock = source.Substring(subtitleStart, videoStart - subtitleStart);
+            StringAssert.Contains("CreatePlaybackRateStepper(root.transform)", playbackBlock);
+            StringAssert.DoesNotContain("PlaybackRateStepperRow", subtitleBlock);
+            StringAssert.DoesNotContain("CreatePlaybackRateStepper", subtitleBlock);
+        }
+
+        [Test]
+        public void XrStepperControl_UsesSoftKeyboardWithVisibleDecimalKey()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/Common/XrStepperControl.cs"));
+
+            StringAssert.Contains("ConfigureNumericKeyboard(inputField)", source);
+            StringAssert.Contains("ConfigureNumericKeyboard(field)", source);
+            StringAssert.Contains("field.contentType = TMP_InputField.ContentType.Custom", source);
+            StringAssert.Contains("field.inputType = TMP_InputField.InputType.Standard", source);
+            StringAssert.Contains("field.keyboardType = TouchScreenKeyboardType.EmailAddress", source);
+            StringAssert.Contains("field.characterValidation = TMP_InputField.CharacterValidation.None", source);
+
+            string prefab = File.ReadAllText(Path.Combine(Application.dataPath, "Resources/UI/XrStepperControl.prefab"));
+            StringAssert.Contains("m_ContentType: 9", prefab);
+            StringAssert.Contains("m_KeyboardType: 7", prefab);
+            StringAssert.Contains("m_CharacterValidation: 0", prefab);
         }
 
         [Test]
@@ -1542,19 +1717,59 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void PlaybackUiSettingsService_PersistsOnlyVlcVideoRatio()
+        public void SettingsMenuController_UsesSingleAspectRatioDropdownForVideoSettings()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/Settings/SettingsMenuController.cs"));
+            string videoTab = ExtractMethodBody(source, "private void BuildVideoTab");
+
+            StringAssert.Contains("CreateVideoAspectRatioDropdown(root.transform)", videoTab);
+            StringAssert.Contains("宽高比", source);
+            StringAssert.Contains("VideoAspectRatioDropdown", source);
+            StringAssert.Contains("VideoAspectRatioRow", source);
+            StringAssert.Contains("XrDropdown _videoAspectRatioDropdown", source);
+            StringAssert.Contains("ApplyVideoAspectRatioFromDropdown", source);
+            StringAssert.Contains("\"自动\"", source);
+            StringAssert.Contains("\"16:9\"", source);
+            StringAssert.Contains("\"4:3\"", source);
+            StringAssert.Contains("\"16:10\"", source);
+            StringAssert.Contains("\"2.21:1\"", source);
+            StringAssert.Contains("\"2.35:1\"", source);
+            StringAssert.Contains("\"2.39:1\"", source);
+            StringAssert.Contains("\"5:4\"", source);
+            StringAssert.DoesNotContain("画面拉伸裁剪", videoTab);
+            StringAssert.DoesNotContain("缩放方式", videoTab);
+            StringAssert.DoesNotContain("显示比例", videoTab);
+            StringAssert.DoesNotContain("VideoScaleModeRow", source);
+            StringAssert.DoesNotContain("CreateVideoScaleModeButton", source);
+            StringAssert.DoesNotContain("CreateVideoAspectRatioButton", source);
+        }
+
+        [Test]
+        public void PlaybackUiSettingsService_PersistsAspectRatioSettingsAndMigratesLegacyRatio()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Settings/PlaybackUiSettingsService.cs"));
 
             StringAssert.Contains("KeyVideoRatio = \"video_ratio\"", source);
+            StringAssert.Contains("KeyVideoAspectRatio = \"video_aspect_ratio\"", source);
+            StringAssert.Contains("LoadVideoAspectRatio", source);
+            StringAssert.Contains("SaveVideoAspectRatio", source);
+            StringAssert.Contains("MigrateLegacyVideoRatioIfNeeded", source);
+            StringAssert.Contains("LegacyVideoRatioMigrated", source);
+            StringAssert.Contains("ToLegacyAspectRatio", source);
+            StringAssert.Contains("ToAspectRatioValue", source);
+            StringAssert.Contains("ParseAspectRatio", source);
+            StringAssert.Contains("\"16:9\"", source);
+            StringAssert.Contains("\"4:3\"", source);
+            StringAssert.Contains("\"16:10\"", source);
+            StringAssert.Contains("\"2.21:1\"", source);
+            StringAssert.Contains("\"2.35:1\"", source);
+            StringAssert.Contains("\"2.39:1\"", source);
+            StringAssert.Contains("\"5:4\"", source);
             StringAssert.Contains("VlcPreferenceStore.GetInt", source);
-            StringAssert.Contains("VlcPreferenceStore.PutInt", source);
             StringAssert.DoesNotContain("KeySubtitleRenderMode", source);
             StringAssert.DoesNotContain("KeyAudioChannelMode", source);
             StringAssert.DoesNotContain("SaveSubtitleRenderMode", source);
             StringAssert.DoesNotContain("SaveAudioChannelMode", source);
-            StringAssert.DoesNotContain("VlcPreferenceStore.GetString", source);
-            StringAssert.DoesNotContain("VlcPreferenceStore.PutString", source);
         }
 
         [Test]
@@ -1597,6 +1812,35 @@ namespace XRVLC.Tests
             StringAssert.Contains("fun setAudioChannelMode", source);
             StringAssert.DoesNotContain("xr_audio_channel_mode", source);
             StringAssert.DoesNotContain("putSingle(XR_AUDIO_CHANNEL_MODE", source);
+        }
+
+        private static string ExtractMethodBody(string source, string signature)
+        {
+            int signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
+            Assert.GreaterOrEqual(signatureIndex, 0, $"Missing method signature: {signature}");
+
+            int bodyStart = source.IndexOf('{', signatureIndex);
+            Assert.Greater(bodyStart, signatureIndex, $"Missing method body: {signature}");
+
+            int depth = 0;
+            for (int i = bodyStart; i < source.Length; i++)
+            {
+                if (source[i] == '{')
+                    depth++;
+                else if (source[i] == '}')
+                    depth--;
+
+                if (depth == 0)
+                    return source.Substring(bodyStart, i - bodyStart + 1);
+            }
+
+            Assert.Fail($"Unterminated method body: {signature}");
+            return string.Empty;
+        }
+
+        private static string ExtractMethod(string source, string methodName, string returnType)
+        {
+            return ExtractMethodBody(source, $"{returnType} {methodName}");
         }
 
         private static float GetButtonAlpha(GameObject root, string buttonName)

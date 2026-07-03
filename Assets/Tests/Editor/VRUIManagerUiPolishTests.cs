@@ -55,25 +55,6 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void BatteryIconAndCanvasScalerAreReadableInWorldSpace()
-        {
-            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
-            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
-
-            StringAssert.Contains("public float batteryIconSize = DefaultBatteryIconSize", source);
-            StringAssert.Contains("private const float DefaultBatteryIconSize = 40f", source);
-            StringAssert.Contains("private const float SystemStatusFontSize = 26f", source);
-            StringAssert.Contains("text.fontSize = SystemStatusFontSize", source);
-            StringAssert.Contains("EnsureBatteryIconParentLayout()", source);
-            StringAssert.Contains("batteryIcon.gameObject.SetActive(true)", source);
-            StringAssert.Contains("private const float MinWorldCanvasDynamicPixelsPerUnit = 12f", source);
-            StringAssert.Contains("ConfigureUiCanvasClarity()", source);
-            StringAssert.Contains("scaler.dynamicPixelsPerUnit = Mathf.Max(scaler.dynamicPixelsPerUnit, MinWorldCanvasDynamicPixelsPerUnit)", source);
-            StringAssert.Contains("batteryIconSize: 40", scene);
-            StringAssert.Contains("m_DynamicPixelsPerUnit: 12", scene);
-        }
-
-        [Test]
         public void SpeedButtonIsWideEnoughForRateText()
         {
             string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
@@ -118,7 +99,13 @@ namespace XRVLC.Tests
             StringAssert.Contains("colors.pressedColor = Color.clear", settings);
             StringAssert.DoesNotContain("viewportImage.color = Color.clear", settings);
             StringAssert.DoesNotContain("dropdown.captionButton.targetGraphic = captionGraphic", settings);
+            StringAssert.Contains("dropdown.onBeforeShow.AddListener(() => CloseOtherShortcutDropdowns(dropdown))", settings);
+            StringAssert.Contains("private void CloseOtherShortcutDropdowns(XrDropdown keepOpen)", settings);
+            StringAssert.Contains("CloseShortcutDropdownIfNot(_leftStickClickDropdown, keepOpen)", settings);
+            StringAssert.Contains("dropdown.CloseImmediately()", settings);
             StringAssert.Contains("public void ApplyConfiguredLayout()", dropdown);
+            StringAssert.Contains("public UnityEvent onBeforeShow = new UnityEvent()", dropdown);
+            StringAssert.Contains("onBeforeShow.Invoke()", dropdown);
             StringAssert.Contains("shortcutDropdownPrefab: {fileID: 100002, guid: c0c62f3c680e47df99310ff17cfc4f84, type: 3}", scene);
         }
 
@@ -131,7 +118,9 @@ namespace XRVLC.Tests
             StringAssert.Contains("private const float GestureLabelColumnWidthRatio = 0.25f", settings);
             StringAssert.Contains("CreateGestureRow(parent, label + \"Row\")", settings);
             StringAssert.Contains("CreateText(row, label, menuFontSize, TextAlignmentOptions.Left", settings);
-            StringAssert.Contains("CreateGestureSaveRow(root.transform)", settings);
+            StringAssert.DoesNotContain("CreateGestureSaveRow(root.transform)", settings);
+            StringAssert.DoesNotContain("保存手势设置", settings);
+            StringAssert.Contains("dropdown.onValueChanged.AddListener(_ => SaveGestureMappings())", settings);
             StringAssert.Contains("layout.childAlignment = TextAnchor.MiddleCenter", settings);
             StringAssert.Contains("public float sectionTitleLeftPadding = 104f", settings);
             StringAssert.Contains("CreateSpacer(row, sectionTitleLeftPadding, 36f)", settings);
@@ -139,6 +128,48 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("GetTitleStartX()", settings);
             StringAssert.Contains("captionTextRect.offsetMin = new Vector2(horizontalPadding, 0f)", dropdown);
             StringAssert.Contains("captionTextRect.offsetMax = new Vector2(-horizontalPadding, 0f)", dropdown);
+        }
+
+        [Test]
+        public void GestureSectionTitleUsesIconParkInfoTooltipForFixedShortcuts()
+        {
+            string settings = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Settings/SettingsMenuController.cs"));
+
+            StringAssert.Contains("private const string IconResourcePath = \"UI/IconPark/\"", settings);
+            StringAssert.Contains("private const string GestureInfoIconName = \"info\"", settings);
+            StringAssert.Contains("private const float GestureSectionTitleWidth = 112f", settings);
+            StringAssert.Contains("private const float GestureInfoIconGap = 6f", settings);
+            StringAssert.Contains("摇杆左右：步进/步退\\n\" +", settings);
+            StringAssert.Contains("摇杆左右长按：30s 快进/快退\\n\" +", settings);
+            StringAssert.Contains("摇杆前后：调整屏幕距离\\n\" +", settings);
+            StringAssert.Contains("板机键长按：2x 快速播放\\n\" +", settings);
+            StringAssert.Contains("抓取键：移动屏幕\\n\" +", settings);
+            StringAssert.Contains("按下摇杆：重置屏幕位置", settings);
+            StringAssert.Contains("CreateSectionLabel(root.transform, \"手柄快捷键\", true)", settings);
+            StringAssert.Contains("CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleWidth, 36f)", settings);
+            StringAssert.Contains("CreateSpacer(row, GestureInfoIconGap, 36f)", settings);
+            StringAssert.Contains("CreateGestureInfoButton(row)", settings);
+            StringAssert.Contains("Resources.Load<Sprite>(IconResourcePath + GestureInfoIconName)", settings);
+            StringAssert.Contains("tooltip.alignTopLeftToSource = true", settings);
+            StringAssert.Contains("tooltip.SetSource(null, GestureShortcutTooltipText)", settings);
+            StringAssert.DoesNotContain("CreateText(button.transform, \"i\"", settings);
+        }
+
+        [Test]
+        public void InfoTooltipUsesOpaqueBackgroundAndTopLeftSourceAlignment()
+        {
+            string tooltip = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrOverflowTooltip.cs"));
+
+            StringAssert.Contains("TooltipBackgroundColor = new Color(0.04f, 0.04f, 0.04f, 1f)", tooltip);
+            StringAssert.Contains("EnsureTooltipRootLayout()", tooltip);
+            StringAssert.Contains("layoutElement.ignoreLayout = true", tooltip);
+            StringAssert.Contains("ApplyTooltipRootStyle()", tooltip);
+            StringAssert.Contains("rootImage.color = TooltipBackgroundColor", tooltip);
+            StringAssert.Contains("public bool alignTopLeftToSource", tooltip);
+            StringAssert.Contains("if (alignTopLeftToSource)", tooltip);
+            StringAssert.Contains("tooltipRect.pivot = new Vector2(0f, 1f)", tooltip);
+            StringAssert.Contains("topLeft.x - parentRectBounds.xMin,", tooltip);
+            StringAssert.Contains("topLeft.y - parentRectBounds.yMax);", tooltip);
         }
 
         [Test]
@@ -228,7 +259,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("topLeft.x - parentRectBounds.xMin", tooltip);
             StringAssert.Contains("topLeft.y - parentRectBounds.yMax", tooltip);
             StringAssert.Contains("colors.selectedColor = ResolveNormalColor(selected)", theme);
-            StringAssert.Contains("ApplyRuntimeButtonTheme(eyeBtn, image, enabled)", vr);
+            StringAssert.Contains("ApplyRuntimeButtonTheme(seeThroughBtn, image, enabled)", vr);
             StringAssert.DoesNotContain("image.color = enabled ? PassthroughSelectedColor : TransparentListColor", vr);
         }
 
@@ -246,7 +277,7 @@ namespace XRVLC.Tests
             foreach (string buttonName in new[]
             {
                 "EqualizerBtn", "SubtitleBtn", "PreviousBtn", "PlayBtn", "NextBtn",
-                "SpeedBtn", "EyeBtn", "ThreeDBtn", "SettingsBtn", "PlaylistBtn"
+                "SpeedBtn", "SeeThroughBtn", "ThreeDBtn", "SettingsBtn", "PlaylistBtn"
             })
             {
                 StringAssert.Contains($"m_Name: {buttonName}", scene);
@@ -268,6 +299,8 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("private const float GeometryMenuFontSize = 22f", vr);
             StringAssert.Contains("TryHideVisiblePanelFromNonUiTrigger()", vr);
+            StringAssert.Contains("TryCloseSecondaryPanelFromCurrentUiTarget()", vr);
+            StringAssert.Contains("IsAnySecondaryPanelOpen()", vr);
             StringAssert.Contains("TryClosePlaylistFromCurrentUiTarget()", vr);
             StringAssert.Contains("ClosePlaylistIfManagedUiClickOutsidePlaylist", vr);
 
@@ -277,6 +310,45 @@ namespace XRVLC.Tests
             StringAssert.Contains("public float dropdownCornerRadius = 8f", settings);
             StringAssert.Contains("ConfigureShortcutDropdownVisual(dropdown)", settings);
             StringAssert.Contains("TextAlignmentOptions.Center", settings);
+        }
+
+        [Test]
+        public void PlaybackTitleUsesScrollingTextPrefab()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string scroller = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrScrollingTitleText.cs"));
+            string prefab = File.ReadAllText(ProjectFile("Assets/Prefabs/UI/ScrollingTitleText.prefab"));
+            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
+
+            StringAssert.DoesNotContain("public TextMeshProUGUI titleText", source);
+            StringAssert.Contains("public XrScrollingTitleText titleScroller", source);
+            StringAssert.Contains("titleScroller.SetText(GetDisplayTitle(media))", source);
+            StringAssert.DoesNotContain("titleText.enabled = true", source);
+
+            StringAssert.Contains("public void SetText(string value)", scroller);
+            StringAssert.Contains("TextAlignmentOptions.MidlineLeft", scroller);
+            StringAssert.Contains("TextOverflowModes.Overflow", scroller);
+            StringAssert.Contains("preferredWidth", scroller);
+            StringAssert.Contains("UnityEditor.EditorApplication.delayCall += ApplyQueuedEditorRefresh", scroller);
+            StringAssert.Contains("UnityEditor.EditorApplication.delayCall -= ApplyQueuedEditorRefresh", scroller);
+
+            int onValidateIndex = scroller.IndexOf("private void OnValidate()", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(onValidateIndex, 0);
+            string onValidateBody = scroller.Substring(onValidateIndex, Mathf.Min(180, scroller.Length - onValidateIndex));
+            StringAssert.Contains("QueueEditorRefresh();", onValidateBody);
+            StringAssert.DoesNotContain("ConfigureText();", onValidateBody);
+            StringAssert.DoesNotContain("ResetScroll();", onValidateBody);
+
+            StringAssert.Contains("m_Name: ScrollingTitleText", prefab);
+            StringAssert.Contains("m_Name: TitleText", prefab);
+            StringAssert.Contains("UnityEngine.UI::UnityEngine.UI.RectMask2D", prefab);
+            StringAssert.Contains("Assembly-CSharp::XrScrollingTitleText", prefab);
+            StringAssert.Contains("m_HorizontalAlignment: 1", prefab);
+            StringAssert.Contains("m_TextWrappingMode: 0", prefab);
+            StringAssert.Contains("m_overflowMode: 3", prefab);
+
+            StringAssert.Contains("titleScroller:", scene);
+            StringAssert.DoesNotContain("titleText:", scene);
         }
     }
 }

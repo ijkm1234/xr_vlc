@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using XRVLC.Media;
 
@@ -15,17 +16,18 @@ public class VlcPlaybackBridge : MonoBehaviour
     public static VlcPlaybackSnapshot Snapshot { get; } = new VlcPlaybackSnapshot();
 
     // --- 事件回调 ---
-    public static event Action<int, int> OnVideoSizeChangedEvent;
+    public static event Action<VlcVideoSize> OnVideoSizeChangedEvent;
     public static event Action<string> OnStateChangedEvent;
     public static event Action<long> OnTimeChangedEvent;
     public static event Action<float> OnPositionChangedEvent;
     public static event Action<long> OnLengthChangedEvent;
+    public static event Action<float> OnPlaybackRateChangedEvent;
     public static event Action<float> OnBufferingEvent;
+    public static event Action ClearPlaybackSurfaceEvent;
     
     // 轨道回调事件：List<TrackInfo>
     public static event Action<List<XRVLC.Media.TrackInfo>> OnAudioTracksChangedEvent;
     public static event Action<List<XRVLC.Media.TrackInfo>> OnSubtitleTracksChangedEvent;
-    public static event Action<SubtitleCue> OnSubtitleCueEvent;
     
     // 播放请求事件
     public static event Action<XRVLC.Media.MediaWrapper> OnPlayRequestedEvent;
@@ -46,6 +48,15 @@ public class VlcPlaybackBridge : MonoBehaviour
         {
             Destroy(this.gameObject);
         }
+    }
+
+    public static void PublishPlaybackRate(float rate)
+    {
+        if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
+            rate = 1f;
+
+        Snapshot.PlaybackRate = rate;
+        OnPlaybackRateChangedEvent?.Invoke(rate);
     }
 
     // ==========================================
@@ -129,6 +140,114 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] DetachSurface is only supported on Android device.");
+#endif
+    }
+
+    public static void SetSubtitleSurface(IntPtr surfacePtr)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurface JNI entry: surface={surfacePtr}, isZero={surfacePtr == IntPtr.Zero}");
+            if (surfacePtr == IntPtr.Zero)
+            {
+                Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurface called with zero surface pointer");
+            }
+
+            if (AndroidJNI.AttachCurrentThread() != 0)
+            {
+                Debug.LogError("[VlcPlaybackBridge] Failed to attach JNI thread for subtitle surface");
+                return;
+            }
+
+            IntPtr bridgeClass = AndroidJNI.FindClass("org/videolan/vlc/bridge/PlaybackServiceBridge");
+            if (bridgeClass == IntPtr.Zero)
+            {
+                Debug.LogError("[VlcPlaybackBridge] Failed to find PlaybackServiceBridge class");
+                return;
+            }
+
+            IntPtr setSubtitleSurfaceMethod = AndroidJNI.GetStaticMethodID(bridgeClass, "setSubtitleSurface", "(Landroid/view/Surface;)V");
+            if (setSubtitleSurfaceMethod == IntPtr.Zero)
+            {
+                Debug.LogError("[VlcPlaybackBridge] Failed to find setSubtitleSurface method");
+                return;
+            }
+
+            jvalue[] args = new jvalue[1];
+            args[0].l = surfacePtr;
+            Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurface JNI invoking Android bridge: class={bridgeClass}, method={setSubtitleSurfaceMethod}, surface={surfacePtr}");
+            AndroidJNI.CallStaticVoidMethod(bridgeClass, setSubtitleSurfaceMethod, args);
+
+            Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurface JNI call returned: surface={surfacePtr}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleSurface failed: {e}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurface is only supported on Android device.");
+#endif
+    }
+
+    public static void DetachSubtitleSurface()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                Debug.Log("[VlcPlaybackBridge] DetachSubtitleSurface entry: passing null subtitle surface to Android bridge");
+                bridge.CallStatic("setSubtitleSurface", (AndroidJavaObject)null);
+                Debug.Log("[VlcPlaybackBridge] DetachSubtitleSurface called");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] DetachSubtitleSurface failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] DetachSubtitleSurface is only supported on Android device.");
+#endif
+    }
+
+    public static void SetSubtitleSurfacePolicy(bool stackOutside)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setSubtitleSurfacePolicy", stackOutside);
+                Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurfacePolicy called stackOutside={stackOutside}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleSurfacePolicy failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurfacePolicy is only supported on Android device.");
+#endif
+    }
+
+    public static void SetSubtitleSurfaceEnabled(bool enabled)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setSubtitleSurfaceEnabled", enabled);
+                Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurfaceEnabled called enabled={enabled}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleSurfaceEnabled failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurfaceEnabled is only supported on Android device.");
 #endif
     }
 
@@ -312,56 +431,138 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
-    public static void SetAudioTrack(string trackId)
+    public static TrackSnapshot GetTrackSnapshot()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
             {
-                // JNI CallStatic signature matching: string
-                bridge.CallStatic("setAudioTrack", trackId);
-                Debug.Log($"[VlcPlaybackBridge] SetAudioTrack called with trackId: {trackId}");
+                string payload = bridge.CallStatic<string>("getTrackSnapshot");
+                return VlcPlaybackPayloadParser.ParseTrackSnapshot(payload);
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"[VlcPlaybackBridge] SetAudioTrack failed: {e.Message}");
+            Debug.LogError($"[VlcPlaybackBridge] GetTrackSnapshot failed: {e.Message}");
         }
 #else
-        Debug.LogWarning("[VlcPlaybackBridge] SetAudioTrack is only supported on Android device.");
+        Debug.LogWarning("[VlcPlaybackBridge] GetTrackSnapshot is only supported on Android device.");
 #endif
+
+        return new TrackSnapshot();
+    }
+
+    public static TrackSnapshot GetAudioTrackSnapshot()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                string payload = bridge.CallStatic<string>("getAudioTrackSnapshot");
+                return VlcPlaybackPayloadParser.ParseTrackSnapshot(payload);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetAudioTrackSnapshot failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] GetAudioTrackSnapshot is only supported on Android device.");
+#endif
+
+        return new TrackSnapshot();
+    }
+
+    public static TrackSnapshot GetSubtitleTrackSnapshot()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                string payload = bridge.CallStatic<string>("getSubtitleTrackSnapshot");
+                return VlcPlaybackPayloadParser.ParseTrackSnapshot(payload);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetSubtitleTrackSnapshot failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] GetSubtitleTrackSnapshot is only supported on Android device.");
+#endif
+
+        return new TrackSnapshot();
+    }
+
+    public static TrackSnapshot SetAudioTrackAndGetSnapshot(string trackId)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                string payload = bridge.CallStatic<string>("setAudioTrackAndGetSnapshot", trackId);
+                Debug.Log($"[VlcPlaybackBridge] SetAudioTrackAndGetSnapshot called with trackId: {trackId}");
+                return VlcPlaybackPayloadParser.ParseTrackSnapshot(payload);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetAudioTrackAndGetSnapshot failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetAudioTrackAndGetSnapshot is only supported on Android device.");
+#endif
+
+        return new TrackSnapshot();
+    }
+
+    public static TrackSnapshot SetSpuTrackAndGetSnapshot(string trackId)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                string payload = bridge.CallStatic<string>("setSpuTrackAndGetSnapshot", trackId);
+                Debug.Log($"[VlcPlaybackBridge] SetSpuTrackAndGetSnapshot called with trackId: {trackId}");
+                return VlcPlaybackPayloadParser.ParseTrackSnapshot(payload);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSpuTrackAndGetSnapshot failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetSpuTrackAndGetSnapshot is only supported on Android device.");
+#endif
+
+        return new TrackSnapshot();
+    }
+
+    public static void SetAudioTrack(string trackId)
+    {
+        SetAudioTrackAndGetSnapshot(trackId);
     }
 
     public static void SetSpuTrack(string trackId)
     {
-#if UNITY_ANDROID && !UNITY_EDITOR
-        try
-        {
-            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
-            {
-                bridge.CallStatic("setSpuTrack", trackId);
-                Debug.Log($"[VlcPlaybackBridge] SetSpuTrack called with trackId: {trackId}");
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[VlcPlaybackBridge] SetSpuTrack failed: {e.Message}");
-        }
-#else
-        Debug.LogWarning("[VlcPlaybackBridge] SetSpuTrack is only supported on Android device.");
-#endif
+        SetSpuTrackAndGetSnapshot(trackId);
     }
 
     public static void SetSubtitleRenderMode(SubtitleRenderMode mode)
     {
+        SubtitleRenderMode bridgeMode = ToAndroidSubtitleRenderMode(mode);
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
             {
-                bridge.CallStatic("setSubtitleRenderMode", (int)mode);
-                Debug.Log($"[VlcPlaybackBridge] SetSubtitleRenderMode called with mode: {mode}");
+                bridge.CallStatic("setSubtitleRenderMode", (int)bridgeMode);
+                Debug.Log($"[VlcPlaybackBridge] SetSubtitleRenderMode called with uiMode={mode}, androidMode={bridgeMode}");
             }
         }
         catch (Exception e)
@@ -371,6 +572,73 @@ public class VlcPlaybackBridge : MonoBehaviour
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleRenderMode is only supported on Android device.");
 #endif
+    }
+
+    public static void SetSubtitleDelayMicroseconds(long delayUs)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setSubtitleDelay", delayUs);
+                Debug.Log($"[VlcPlaybackBridge] SetSubtitleDelayMicroseconds called with delayUs={delayUs}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleDelayMicroseconds failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleDelayMicroseconds is only supported on Android device.");
+#endif
+    }
+
+    public static long GetSubtitleDelayMicroseconds()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                long delayUs = bridge.CallStatic<long>("getSubtitleDelay");
+                Debug.Log($"[VlcPlaybackBridge] GetSubtitleDelayMicroseconds returned delayUs={delayUs}");
+                return delayUs;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetSubtitleDelayMicroseconds failed: {e.Message}");
+            return 0L;
+        }
+#else
+        return 0L;
+#endif
+    }
+
+    public static void OpenSubtitlePicker()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("openSubtitlePicker");
+                Debug.Log("[VlcPlaybackBridge] OpenSubtitlePicker called");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] OpenSubtitlePicker failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] OpenSubtitlePicker is only supported on Android device.");
+#endif
+    }
+
+    private static SubtitleRenderMode ToAndroidSubtitleRenderMode(SubtitleRenderMode mode)
+    {
+        return mode;
     }
 
     public static void SetVideoScaleOrdinal(int scaleOrdinal)
@@ -436,6 +704,29 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
+    public static float GetPlaybackRate()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                float rate = bridge.CallStatic<float>("getRate");
+                PublishPlaybackRate(rate);
+                Debug.Log($"[VlcPlaybackBridge] GetPlaybackRate returned: {rate}");
+                return Snapshot.PlaybackRate;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetPlaybackRate failed: {e.Message}");
+            return Snapshot.PlaybackRate;
+        }
+#else
+        return Snapshot.PlaybackRate;
+#endif
+    }
+
     public static string GetPlaylist()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -487,11 +778,17 @@ public class VlcPlaybackBridge : MonoBehaviour
         try
         {
             string[] parts = sizeStr.Split('|');
-            if (parts.Length == 2)
+            if (parts.Length == 2 || parts.Length == 4)
             {
-                int width = int.Parse(parts[0]);
-                int height = int.Parse(parts[1]);
-                OnVideoSizeChangedEvent?.Invoke(width, height);
+                int width = int.Parse(parts[0], CultureInfo.InvariantCulture);
+                int height = int.Parse(parts[1], CultureInfo.InvariantCulture);
+                int visibleWidth = parts.Length == 4
+                    ? int.Parse(parts[2], CultureInfo.InvariantCulture)
+                    : width;
+                int visibleHeight = parts.Length == 4
+                    ? int.Parse(parts[3], CultureInfo.InvariantCulture)
+                    : height;
+                OnVideoSizeChangedEvent?.Invoke(new VlcVideoSize(width, height, visibleWidth, visibleHeight));
             }
         }
         catch (Exception e)
@@ -534,6 +831,19 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
     }
 
+    public void OnPlaybackRateChanged(string rateStr)
+    {
+        if (float.TryParse(rateStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float rate))
+        {
+            Debug.Log($"[VlcPlaybackBridge] OnPlaybackRateChanged: {rate}");
+            PublishPlaybackRate(rate);
+        }
+        else
+        {
+            Debug.LogWarning($"[VlcPlaybackBridge] OnPlaybackRateChanged parse failed: {rateStr}");
+        }
+    }
+
     public void OnBuffering(string bufferStr)
     {
         if (float.TryParse(bufferStr, out float buffering))
@@ -545,33 +855,20 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public void OnAudioTracksChanged(string tracksData)
     {
-        Debug.Log($"[VlcPlaybackBridge] OnAudioTracksChanged: {tracksData}");
-        var tracks = VlcPlaybackPayloadParser.ParseTracksData(tracksData);
-        Snapshot.SetAudioTracks(tracks);
-        OnAudioTracksChangedEvent?.Invoke(tracks);
+        Debug.Log($"[VlcPlaybackBridge] OnAudioTracksChanged dirty notification: {tracksData}");
+        OnAudioTracksChangedEvent?.Invoke(null);
     }
 
     public void OnSubtitleTracksChanged(string tracksData)
     {
-        Debug.Log($"[VlcPlaybackBridge] OnSubtitleTracksChanged: {tracksData}");
-        var tracks = VlcPlaybackPayloadParser.ParseTracksData(tracksData);
-        Snapshot.SetSubtitleTracks(tracks);
-        OnSubtitleTracksChangedEvent?.Invoke(tracks);
+        Debug.Log($"[VlcPlaybackBridge] OnSubtitleTracksChanged dirty notification: {tracksData}");
+        OnSubtitleTracksChangedEvent?.Invoke(null);
     }
 
-    public void OnSubtitleCue(string cueJson)
+    public void ClearPlaybackSurface()
     {
-        var cue = VlcPlaybackPayloadParser.ParseSubtitleCuePayload(cueJson);
-        Debug.Log($"[VlcPlaybackBridge] OnSubtitleCue: source={cue.source}, textLength={cue.text?.Length ?? 0}, payload={Preview(cueJson)}");
-        Snapshot.SetSubtitleCue(cue);
-        OnSubtitleCueEvent?.Invoke(cue);
-    }
-
-    private static string Preview(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        value = value.Replace('\n', ' ').Replace('\r', ' ');
-        return value.Length <= 220 ? value : value.Substring(0, 220) + "...";
+        Debug.Log("[VlcPlaybackBridge] ClearPlaybackSurface");
+        ClearPlaybackSurfaceEvent?.Invoke();
     }
 
     /// <summary>
@@ -585,9 +882,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
         try
         {
-            var mediaWrapper = VlcPlaybackPayloadParser.ParseStartPlayPayload(
-                jsonPayload,
-                XRVLC.Media.VlcMediaLibraryBridge.GetLastTime);
+            var mediaWrapper = VlcPlaybackPayloadParser.ParseStartPlayPayload(jsonPayload);
             if (mediaWrapper == null) return;
 
             XRVLC.Media.VlcMediaLibraryBridge.AddToHistory(mediaWrapper.Uri, mediaWrapper.Title);
@@ -606,7 +901,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     /// <summary>
     /// Android 解析完媒体后回调，携带分辨率、libvlc projection、时长。
-    /// JSON 格式: {"width":3840,"height":1920,"projection":"360","duration":7200000}
+    /// JSON 格式: {"width":3840,"height":1920,"visibleWidth":3840,"visibleHeight":1920,"projection":"360","duration":7200000}
     /// </summary>
     public void OnMediaParseFinished(string json)
     {

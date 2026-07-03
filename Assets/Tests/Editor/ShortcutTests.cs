@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.IO;
 using UnityEngine;
 using UnityEngine.XR;
 using XRVLC;
@@ -8,6 +9,41 @@ namespace XRVLC.Tests
     [TestFixture]
     public class ShortcutTests
     {
+        private static string ProjectFile(string relativePath)
+        {
+            return Path.GetFullPath(Path.Combine(Application.dataPath, "..", relativePath));
+        }
+
+        [Test]
+        public void ShortcutSettingsPanels_SaveImmediatelyOnDropdownChange()
+        {
+            string tabbedSettings = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Settings/SettingsMenuController.cs"));
+            string legacyPanel = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Settings/ShortcutConfigPanel.cs"));
+            string shortcutSettings = File.ReadAllText(ProjectFile("Assets/Scripts/Services/Shortcuts/ShortcutSettingsService.cs"));
+
+            StringAssert.Contains("dropdown.onValueChanged.AddListener(_ => SaveGestureMappings())", tabbedSettings);
+            StringAssert.Contains("dropdown.onValueChanged.AddListener(OnShortcutDropdownChanged)", legacyPanel);
+            StringAssert.Contains("SetValueWithoutNotify", tabbedSettings);
+            StringAssert.Contains("SetValueWithoutNotify", legacyPanel);
+            StringAssert.DoesNotContain("CreateGestureSaveRow", tabbedSettings);
+            StringAssert.DoesNotContain("saveButton.onClick.AddListener(Save)", legacyPanel);
+
+            StringAssert.Contains("DefaultSeekSeconds = 5", shortcutSettings);
+            StringAssert.Contains("MinSeekSeconds = 1", shortcutSettings);
+            StringAssert.Contains("MaxSeekSeconds = 180", shortcutSettings);
+            StringAssert.Contains("KeyVideoJumpDelay", shortcutSettings);
+            StringAssert.Contains("SaveShortcutSeekSeconds", shortcutSettings);
+            StringAssert.Contains("ClampShortcutSeekSeconds", shortcutSettings);
+            StringAssert.Contains("VlcPreferenceStore.PutInt(KeyVideoJumpDelay", shortcutSettings);
+
+            StringAssert.Contains("步进时长", tabbedSettings);
+            StringAssert.Contains("LoadShortcutSeekSeconds", tabbedSettings);
+            StringAssert.Contains("SaveShortcutSeekSeconds", tabbedSettings);
+            StringAssert.Contains("StepSeekSeconds", tabbedSettings);
+            StringAssert.Contains("ApplySeekSecondsFromInput", tabbedSettings);
+            StringAssert.Contains("_shortcutManager?.ReloadConfig()", tabbedSettings);
+        }
+
         [Test]
         public void Config_FromEmptyJson_UsesDefaults()
         {
@@ -51,6 +87,69 @@ namespace XRVLC.Tests
 
             Assert.AreEqual(ShortcutCommandType.SeekForward, first.Type);
             Assert.AreEqual(ShortcutCommandType.None, held.Type);
+        }
+
+        [Test]
+        public void InputState_LeftStickHeldFullyRight_WaitsOneSecondThenRepeatsThirtySecondSeek()
+        {
+            var state = new ShortcutInputState();
+
+            var initialStep = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0f);
+            var heldBeforeDelay = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.99f);
+            var heldAtDelay = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.01f);
+            var heldBeforeRepeat = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.49f);
+            var heldAtRepeat = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.01f);
+
+            Assert.AreEqual(ShortcutCommandType.SeekForward, initialStep.Type);
+            Assert.AreEqual(ShortcutCommandType.None, heldBeforeDelay.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekForward30Seconds, heldAtDelay.Type);
+            Assert.AreEqual(ShortcutCommandType.None, heldBeforeRepeat.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekForward30Seconds, heldAtRepeat.Type);
+        }
+
+        [Test]
+        public void InputState_RightStickHeldFullyLeft_WaitsOneSecondThenRepeatsThirtySecondSeek()
+        {
+            var state = new ShortcutInputState();
+
+            var initialStep = state.UpdateHand(XRNode.RightHand, new Vector2(-1f, 0f), false, false, deltaTimeSeconds: 0f);
+            var heldBeforeDelay = state.UpdateHand(XRNode.RightHand, new Vector2(-1f, 0f), false, false, deltaTimeSeconds: 0.99f);
+            var heldAtDelay = state.UpdateHand(XRNode.RightHand, new Vector2(-1f, 0f), false, false, deltaTimeSeconds: 0.01f);
+            var heldBeforeRepeat = state.UpdateHand(XRNode.RightHand, new Vector2(-1f, 0f), false, false, deltaTimeSeconds: 0.49f);
+            var heldAtRepeat = state.UpdateHand(XRNode.RightHand, new Vector2(-1f, 0f), false, false, deltaTimeSeconds: 0.01f);
+
+            Assert.AreEqual(ShortcutCommandType.SeekBackward, initialStep.Type);
+            Assert.AreEqual(ShortcutCommandType.None, heldBeforeDelay.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekBackward30Seconds, heldAtDelay.Type);
+            Assert.AreEqual(ShortcutCommandType.None, heldBeforeRepeat.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekBackward30Seconds, heldAtRepeat.Type);
+        }
+
+        [Test]
+        public void InputState_StickHeldPastNormalButNotFull_DoesNotRepeatThirtySecondSeek()
+        {
+            var state = new ShortcutInputState();
+
+            var initialStep = state.UpdateHand(XRNode.LeftHand, new Vector2(0.9f, 0f), false, false, deltaTimeSeconds: 0f);
+            var held = state.UpdateHand(XRNode.LeftHand, new Vector2(0.9f, 0f), false, false, deltaTimeSeconds: 2f);
+
+            Assert.AreEqual(ShortcutCommandType.SeekForward, initialStep.Type);
+            Assert.AreEqual(ShortcutCommandType.None, held.Type);
+        }
+
+        [Test]
+        public void InputState_FullStickLargeDelta_DoesNotCatchUpRepeatsOnFollowingFrame()
+        {
+            var state = new ShortcutInputState();
+
+            state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0f);
+            var delayed = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 2f);
+            var nextFrame = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.01f);
+            var nextInterval = state.UpdateHand(XRNode.LeftHand, new Vector2(1f, 0f), false, false, deltaTimeSeconds: 0.49f);
+
+            Assert.AreEqual(ShortcutCommandType.SeekForward30Seconds, delayed.Type);
+            Assert.AreEqual(ShortcutCommandType.None, nextFrame.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekForward30Seconds, nextInterval.Type);
         }
 
         [Test]

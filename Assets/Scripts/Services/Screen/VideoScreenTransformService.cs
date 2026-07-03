@@ -5,6 +5,10 @@ namespace XRVLC
 {
     public class VideoScreenTransformService
     {
+        private const float Sphere180DistanceSpeedMultiplier = 4f;
+        private const float Sphere180MaxPullCloserOffsetMeters = 30f;
+        private const float Sphere180MaxPushFartherOffsetMeters = 50f;
+
         private readonly Transform _screenRoot;
         private readonly Transform _videoAnchor;
         private readonly Func<Transform> _viewerProvider;
@@ -17,6 +21,8 @@ namespace XRVLC
         private Vector3 _controllerMovePivot;
         private Vector3 _controllerMoveStartTargetOffset;
         private Vector3 _controllerMoveStartRayDirection;
+        private Quaternion _controllerMoveStartTargetRotation;
+        private float _sphere180DistanceOffsetMeters;
         private Transform _activeMoveTarget;
 
         public VideoScreenTransformService(
@@ -52,32 +58,54 @@ namespace XRVLC
         }
 
         /// <summary>
-        /// 将旧的前后偏移输入路由到平面 zoom；全景模式锁定球心，不响应距离输入。
+        /// 将旧的前后偏移输入路由到平面 zoom；180 半球沿球心到屏幕中心的半径方向移动。
         /// </summary>
         public void AddViewerDistanceOffset(float deltaMeters)
         {
-            if (IsImmersive())
-                return;
-
             Transform target = GetMoveTarget();
             if (target == null) return;
 
             EnsureMoveTargetState();
-            if (IsFlatZoomProjection())
+            VideoProjection projection = GetCurrentProjection();
+            if (projection == VideoProjection.Flat || projection == VideoProjection.Cylinder)
             {
                 _flatZoomDeltaHandler?.Invoke(deltaMeters);
                 return;
             }
+
+            if (projection == VideoProjection.Sphere360)
+                return;
+
+            if (projection != VideoProjection.Sphere180)
+                return;
+
+            if (!TryNormalizeDirection(target.forward, out Vector3 sphereCenterToScreenCenter))
+                return;
+
+            float requestedOffset =
+                _sphere180DistanceOffsetMeters + deltaMeters * Sphere180DistanceSpeedMultiplier;
+            float clampedOffset = Mathf.Clamp(
+                requestedOffset,
+                -Sphere180MaxPushFartherOffsetMeters,
+                Sphere180MaxPullCloserOffsetMeters);
+            float appliedOffset = clampedOffset - _sphere180DistanceOffsetMeters;
+            if (Mathf.Approximately(appliedOffset, 0f))
+                return;
+
+            target.position += sphereCenterToScreenCenter * appliedOffset;
+            _sphere180DistanceOffsetMeters = clampedOffset;
+        }
+
+        public void ResetImmersiveDistanceOffset()
+        {
+            _sphere180DistanceOffsetMeters = 0f;
         }
 
         /// <summary>
-        /// 记录 Grip 拖动开始时的手柄射线方向和幕布中心相对相机的位置。
+        /// 记录 Grip 拖动开始时的手柄射线方向、目标位置和目标旋转。
         /// </summary>
         public void BeginControllerMove(Vector3 controllerRayDirection)
         {
-            if (IsImmersive())
-                return;
-
             Transform target = GetMoveTarget();
             Transform viewer = _viewerProvider?.Invoke();
             if (target == null) return;
@@ -90,16 +118,14 @@ namespace XRVLC
             _controllerMovePivot = viewer.position;
             _controllerMoveStartTargetOffset = target.position - _controllerMovePivot;
             _controllerMoveStartRayDirection = startRayDirection;
+            _controllerMoveStartTargetRotation = target.rotation;
         }
 
         /// <summary>
-        /// 根据手柄射线方向变化，让幕布中心绕相机旋转；全景模式不响应。
+        /// 根据手柄射线方向变化，平面幕布绕相机移动，全景锚点跟随拖拽旋转。
         /// </summary>
         public void UpdateControllerMove(Vector3 controllerRayDirection)
         {
-            if (IsImmersive())
-                return;
-
             Transform target = GetMoveTarget();
             if (target == null) return;
             if (!TryNormalizeDirection(controllerRayDirection, out Vector3 currentRayDirection))
@@ -110,13 +136,22 @@ namespace XRVLC
             if (!_isControllerMoveActive)
                 return;
 
-            if (_controllerMoveStartRayDirection.sqrMagnitude < 0.0001f ||
-                _controllerMoveStartTargetOffset.sqrMagnitude < 0.0001f)
+            if (_controllerMoveStartRayDirection.sqrMagnitude < 0.0001f)
                 return;
 
             Quaternion orbitRotation = Quaternion.FromToRotation(
                 _controllerMoveStartRayDirection,
                 currentRayDirection);
+
+            if (IsImmersive())
+            {
+                target.rotation = orbitRotation * _controllerMoveStartTargetRotation;
+                return;
+            }
+
+            if (_controllerMoveStartTargetOffset.sqrMagnitude < 0.0001f)
+                return;
+
             target.position = _controllerMovePivot + orbitRotation * _controllerMoveStartTargetOffset;
 
             FacePoint(target, _controllerMovePivot);
@@ -155,18 +190,15 @@ namespace XRVLC
 
         private bool IsImmersive()
         {
-            VideoProjection projection = _projectionProvider != null
-                ? _projectionProvider()
-                : VideoProjection.Flat;
+            VideoProjection projection = GetCurrentProjection();
             return projection == VideoProjection.Sphere360 || projection == VideoProjection.Sphere180;
         }
 
-        private bool IsFlatZoomProjection()
+        private VideoProjection GetCurrentProjection()
         {
-            VideoProjection projection = _projectionProvider != null
+            return _projectionProvider != null
                 ? _projectionProvider()
                 : VideoProjection.Flat;
-            return projection == VideoProjection.Flat || projection == VideoProjection.Cylinder;
         }
 
         private Transform GetMoveTarget()

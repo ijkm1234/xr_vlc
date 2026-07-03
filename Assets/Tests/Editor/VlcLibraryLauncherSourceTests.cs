@@ -39,14 +39,17 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void AndroidLaunch_UsesBridgeReorderInsteadOfNewTask()
+        public void AndroidLaunch_RestoresExistingVlcTaskBeforeStartingFallback()
         {
             string source = ReadLauncherSource();
 
-            StringAssert.Contains("ShowLastVlcActivityOrStartFallback(currentActivity);", source);
-            StringAssert.Contains("showLastVlcActivity", source);
-            StringAssert.DoesNotContain("FLAG_ACTIVITY_NEW_TASK", source);
-            StringAssert.DoesNotContain("addFlags\", 268435456", source);
+            StringAssert.Contains("RestoreVlcTaskOrStartFallback(currentActivity);", source);
+            StringAssert.Contains("restoreVlcTask", source);
+            StringAssert.Contains("if (bridge.CallStatic<bool>(\"restoreVlcTask\", currentActivity))", source);
+            StringAssert.Contains("FlagActivityNewTask", source);
+            StringAssert.Contains("addFlags\", FlagActivityNewTask", source);
+            StringAssert.DoesNotContain("ShowLastVlcActivityOrStartFallback", source);
+            StringAssert.DoesNotContain("showLastVlcActivity", source);
         }
     }
 }

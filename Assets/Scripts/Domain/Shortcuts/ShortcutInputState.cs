@@ -6,10 +6,19 @@ namespace XRVLC
     public class ShortcutInputState
     {
         public const float StickThreshold = 0.5f;
+        public const float FullStickThreshold = 0.95f;
+        public const float FullStickInitialSeekDelaySeconds = 1f;
+        public const float FullStickRepeatSeekIntervalSeconds = 0.5f;
         public const float TriggerFastRateHoldSeconds = 0.5f;
 
         private Vector2 _leftAxis;
         private Vector2 _rightAxis;
+        private int _leftFullStickDirection;
+        private int _rightFullStickDirection;
+        private float _leftFullStickHeldSeconds;
+        private float _rightFullStickHeldSeconds;
+        private float _leftFullStickNextSeekSeconds;
+        private float _rightFullStickNextSeekSeconds;
         private bool _leftPrimaryPressed;
         private bool _rightPrimaryPressed;
         private bool _leftSecondaryPressed;
@@ -47,6 +56,10 @@ namespace XRVLC
             if (!stickPressed && axis.x < -StickThreshold && previousAxis.x >= -StickThreshold)
                 return new ShortcutCommand(ShortcutCommandType.SeekBackward);
 
+            ShortcutCommand fullStickCommand = UpdateFullStickHold(hand, axis, stickPressed, deltaTimeSeconds);
+            if (fullStickCommand.Type != ShortcutCommandType.None)
+                return fullStickCommand;
+
             if (CheckEdge(hand, ButtonKind.Primary, primaryButtonPressed))
                 return new ShortcutCommand(ShortcutCommandType.TogglePlayPause);
 
@@ -73,6 +86,12 @@ namespace XRVLC
         {
             _leftAxis = Vector2.zero;
             _rightAxis = Vector2.zero;
+            _leftFullStickDirection = 0;
+            _rightFullStickDirection = 0;
+            _leftFullStickHeldSeconds = 0f;
+            _rightFullStickHeldSeconds = 0f;
+            _leftFullStickNextSeekSeconds = FullStickInitialSeekDelaySeconds;
+            _rightFullStickNextSeekSeconds = FullStickInitialSeekDelaySeconds;
             _leftPrimaryPressed = false;
             _rightPrimaryPressed = false;
             _leftSecondaryPressed = false;
@@ -100,6 +119,81 @@ namespace XRVLC
         {
             if (hand == XRNode.LeftHand) _leftAxis = axis;
             else _rightAxis = axis;
+        }
+
+        private ShortcutCommand UpdateFullStickHold(XRNode hand, Vector2 axis, bool stickPressed, float deltaTimeSeconds)
+        {
+            int direction = GetFullStickDirection(axis, stickPressed);
+            if (direction == 0)
+            {
+                ResetFullStickHold(hand);
+                return ShortcutCommand.None;
+            }
+
+            if (direction != GetFullStickDirection(hand))
+                StartFullStickHold(hand, direction);
+
+            float heldSeconds = GetFullStickHeldSeconds(hand) + Mathf.Max(0f, deltaTimeSeconds);
+            SetFullStickHeldSeconds(hand, heldSeconds);
+
+            float nextSeekSeconds = GetFullStickNextSeekSeconds(hand);
+            if (heldSeconds < nextSeekSeconds)
+                return ShortcutCommand.None;
+
+            SetFullStickNextSeekSeconds(hand, heldSeconds + FullStickRepeatSeekIntervalSeconds);
+            return new ShortcutCommand(direction > 0
+                ? ShortcutCommandType.SeekForward30Seconds
+                : ShortcutCommandType.SeekBackward30Seconds);
+        }
+
+        private static int GetFullStickDirection(Vector2 axis, bool stickPressed)
+        {
+            if (stickPressed)
+                return 0;
+            if (axis.x >= FullStickThreshold)
+                return 1;
+            if (axis.x <= -FullStickThreshold)
+                return -1;
+            return 0;
+        }
+
+        private int GetFullStickDirection(XRNode hand) =>
+            hand == XRNode.LeftHand ? _leftFullStickDirection : _rightFullStickDirection;
+
+        private float GetFullStickHeldSeconds(XRNode hand) =>
+            hand == XRNode.LeftHand ? _leftFullStickHeldSeconds : _rightFullStickHeldSeconds;
+
+        private void SetFullStickHeldSeconds(XRNode hand, float seconds)
+        {
+            if (hand == XRNode.LeftHand) _leftFullStickHeldSeconds = seconds;
+            else _rightFullStickHeldSeconds = seconds;
+        }
+
+        private float GetFullStickNextSeekSeconds(XRNode hand) =>
+            hand == XRNode.LeftHand ? _leftFullStickNextSeekSeconds : _rightFullStickNextSeekSeconds;
+
+        private void SetFullStickNextSeekSeconds(XRNode hand, float seconds)
+        {
+            if (hand == XRNode.LeftHand) _leftFullStickNextSeekSeconds = seconds;
+            else _rightFullStickNextSeekSeconds = seconds;
+        }
+
+        private void StartFullStickHold(XRNode hand, int direction)
+        {
+            if (hand == XRNode.LeftHand) _leftFullStickDirection = direction;
+            else _rightFullStickDirection = direction;
+
+            SetFullStickHeldSeconds(hand, 0f);
+            SetFullStickNextSeekSeconds(hand, FullStickInitialSeekDelaySeconds);
+        }
+
+        private void ResetFullStickHold(XRNode hand)
+        {
+            if (hand == XRNode.LeftHand) _leftFullStickDirection = 0;
+            else _rightFullStickDirection = 0;
+
+            SetFullStickHeldSeconds(hand, 0f);
+            SetFullStickNextSeekSeconds(hand, FullStickInitialSeekDelaySeconds);
         }
 
         /// <summary>

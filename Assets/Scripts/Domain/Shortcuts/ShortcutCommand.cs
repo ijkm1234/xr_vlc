@@ -5,6 +5,8 @@ namespace XRVLC
         None,
         SeekBackward,
         SeekForward,
+        SeekBackward30Seconds,
+        SeekForward30Seconds,
         TogglePlayPause,
         BeginShortcutFastRate,
         EndShortcutFastRate,
