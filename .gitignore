@@ -1,5 +1,6 @@
 Troubleshooting/
 
+.DS_Store
 .migration-backup/
 .claude/
 .codex/
@@ -18,6 +19,8 @@ output.apk
 output-*.symbols.zip
 output_BackUpThisFolder_ButDontShipItWithYourGame/
 xr_vlc_BurstDebugInformation_DoNotShip/
+diagnostic-builds/
+Assets/_Recovery/
 
 *.csproj
 *.slnx
