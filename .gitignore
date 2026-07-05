@@ -22,6 +22,11 @@ xr_vlc_BurstDebugInformation_DoNotShip/
 diagnostic-builds/
 Assets/_Recovery/
 
+# Local project documentation/design notes
+/Docs/
+/docs/
+/doc/
+
 # Local AAR unzip/extraction output
 /META-INF/
 /androidx/
