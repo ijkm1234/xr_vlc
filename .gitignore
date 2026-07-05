@@ -23,6 +23,11 @@ diagnostic-builds/
 Assets/_Recovery/
 
 # Local project documentation/design notes
+/AGENTS.md
+/README.md
+/Troubleshooting_VLC_Playback.md
+/Unity_Setup_Checklist.md
+/PicoSDK_Patches/*.md
 /Docs/
 /docs/
 /doc/
