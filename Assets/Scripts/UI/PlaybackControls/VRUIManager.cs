@@ -11,13 +11,18 @@ using XRVLC.UI.XR;
 public class VRUIManager : MonoBehaviour
 {
     private const string IconResourcePath = "UI/IconPark/";
-    private const string BatteryUnknownIcon = "battery";
-    private const string BatteryEmptyIcon = "battery-empty";
-    private const string BatteryLowIcon = "battery-low";
-    private const string BatteryMediumIcon = "battery-medium";
-    private const string BatteryFullIcon = "battery-full";
+    private const string BatteryShellIcon = "battery-empty";
+    private const string BatteryFillObjectName = "BatteryFill";
+    private const float BatteryFillAlpha = 0.5f;
+    private const float BatteryStatusFontSize = 20f;
+    private const int BatteryLowThresholdPercent = 20;
+    private const float BatteryBodyInnerMinX = 0.13f;
+    private const float BatteryBodyInnerMaxX = 0.79f;
+    private const float BatteryBodyInnerHeightRatio = 0.34f;
     private const string LoadingIconResourceName = "loading-four";
     private static readonly Color IconTint = Color.white;
+    private static readonly Color BatteryLowFillColor = new Color(1f, 0.53333336f, 0f, BatteryFillAlpha);
+    private static readonly Color BatteryNormalFillColor = new Color(1f, 1f, 1f, BatteryFillAlpha);
     private static readonly Color TransparentListColor = new Color(1f, 1f, 1f, 0f);
     private static readonly Color HoverListColor = new Color(1f, 1f, 1f, 0.16f);
     private static readonly Color SelectedListColor = new Color(1f, 1f, 1f, 0.24f);
@@ -41,18 +46,20 @@ public class VRUIManager : MonoBehaviour
     private const float SystemSliderHandleSize = 27f;
     private const float SystemSliderTrackMin = 0.4f;
     private const float SystemSliderTrackMax = 0.6f;
-    private const float LoadingOverlaySize = 160f;
+    private const float SystemSliderPercentTextHeight = 28f;
+    private const float SystemSliderPercentTextGap = 8f;
+    private const float SystemSliderStickThreshold = 0.25f;
+    private const float SystemSliderStickPercentPerSecond = 80f;
+    private const string SystemVolumeBoostMarkerName = "VolumeBoost100Marker";
     private const float LoadingSpinnerSize = 84f;
     private const float LoadingSpinnerDegreesPerSecond = -240f;
-    private const float LoadingDistanceFromCameraMeters = 5f;
-    private const float LoadingPanelUpOffsetMeters = 2.5f;
-    private const float LoadingWorldCanvasScale = 0.0025f;
     private const float SystemTimeTextWidth = 68f;
     private const float SystemStatusFontSize = 26f;
     private const float GeometryMenuFontSize = 22f;
     private const float geometryMenuFlatHeight = 280f;
     private const float geometryMenuPanoramicHeight = 194f;
-    private const float MinWorldCanvasDynamicPixelsPerUnit = 12f;
+    private const float MinWorldCanvasDynamicPixelsPerUnit = 24f;
+    private const float UiTextSharpness = 0.35f;
     private const int AndroidStreamMusic = 3;
     private const string ChooseSubtitleTrackOptionLabel = "选择其他字幕";
     private static readonly System.Collections.Generic.HashSet<string> SubtitleLanguageSuffixes =
@@ -176,12 +183,15 @@ public class VRUIManager : MonoBehaviour
     private Coroutine _pendingTrackDropdownShow;
     private GameObject systemSliderPopup;
     private Slider systemSlider;
+    private TextMeshProUGUI systemSliderPercentText;
+    private GameObject systemSliderBoostMarker;
+    private ProgressHoverTimeBubble progressHoverTimeBubble;
+    private Image batteryFill;
     [SerializeField] private GameObject loadingOverlay;
     [SerializeField] private RectTransform loadingSpinnerTransform;
     [SerializeField] private Image loadingSpinnerImage;
     private bool isLoadingVisible;
     private bool loadingOverlayMissingWarningShown;
-    private readonly Vector3[] loadingPanelWorldCorners = new Vector3[4];
     private SystemSliderMode _activeSystemSliderMode = SystemSliderMode.None;
     private bool _isUpdatingSystemSlider;
     private float _simulatedBrightness = 0.75f;
@@ -194,6 +204,11 @@ public class VRUIManager : MonoBehaviour
         None,
         Brightness,
         Volume
+    }
+
+    private void Awake()
+    {
+        SetPanelVisibility(false);
     }
 
     private void Start()
@@ -215,7 +230,10 @@ public class VRUIManager : MonoBehaviour
         }
 
         if (progressSlider != null)
+        {
             progressSlider.onValueChanged.AddListener(OnSliderValueChanged);
+            EnsureProgressHoverTimeBubble();
+        }
 
         if (speedBtn != null)
         {
@@ -258,15 +276,11 @@ public class VRUIManager : MonoBehaviour
 
         EnsureRuntimeTextVisible();
         ConfigureUiCanvasClarity();
+        ConfigureUiTextEdgeClarity();
         ConfigureSecondaryDropdown(audioTrackDropdown, true);
         ConfigureSecondaryDropdown(subtitleTrackDropdown, true);
         InitializeTrackDropdownDefault(audioTrackDropdown, "无音轨");
         InitializeTrackDropdownDefault(subtitleTrackDropdown, "无字幕");
-
-        if (audioTrackDropdown != null)
-            audioTrackDropdown.onValueChanged.AddListener(OnAudioTrackSelected);
-        if (subtitleTrackDropdown != null)
-            subtitleTrackDropdown.onValueChanged.AddListener(OnSubtitleTrackSelected);
 
         ApplyIconSprites();
         UpdateSeeThroughButtonPassthroughVisual();
@@ -285,6 +299,7 @@ public class VRUIManager : MonoBehaviour
         UpdateSystemStatus();
 
         HandleTriggerInput();
+        HandleSystemSliderStickInput();
         UpdateLoadingAnimation();
 
         if (_autoHidePending)
@@ -402,6 +417,7 @@ public class VRUIManager : MonoBehaviour
         bool anyOpenBefore = IsAnyTrackDropdownOpen();
         GameObject target = null;
         bool hasTarget = uiInputGate != null && uiInputGate.TryGetCurrentUiTarget(out target);
+        XrDropdownItem dropdownItem = target != null ? target.GetComponentInParent<XrDropdownItem>() : null;
         bool consumed = uiInputGate != null &&
             uiInputGate.TryConsumeCurrentHover(new XrUiEvent(XrUiEventType.TriggerReleased, XRNode.RightHand));
 
@@ -410,6 +426,7 @@ public class VRUIManager : MonoBehaviour
             Debug.Log(
                 $"[VRUIManager][TrackDropdown] triggerGate consumed={consumed} " +
                 $"hasTarget={hasTarget} target={DescribeUiTarget(target)} " +
+                $"dropdownItem={DescribeUiTarget(dropdownItem != null ? dropdownItem.gameObject : null)} " +
                 $"anyOpenBefore={anyOpenBefore} anyOpenAfter={IsAnyTrackDropdownOpen()}");
         }
 
@@ -609,7 +626,23 @@ public class VRUIManager : MonoBehaviour
 
     private static bool ShouldShowTrackDropdown(XrDropdown dropdown)
     {
-        return dropdown != null && dropdown.interactable && !dropdown.IsOpen;
+        bool result = dropdown != null && dropdown.interactable && !dropdown.IsOpen;
+        Debug.Log(
+            $"[VRUIManager][TrackDropdown] shouldShow return result={result} " +
+            $"reason={DescribeShouldShowTrackDropdownReason(dropdown)} " +
+            $"dropdown={DescribeUiTarget(dropdown != null ? dropdown.gameObject : null)}");
+        return result;
+    }
+
+    private static string DescribeShouldShowTrackDropdownReason(XrDropdown dropdown)
+    {
+        if (dropdown == null)
+            return "dropdownNull";
+        if (!dropdown.interactable)
+            return "notInteractable";
+        if (dropdown.IsOpen)
+            return "alreadyOpen";
+        return "ready";
     }
 
     private bool IsTrackDropdownObject(GameObject target)
@@ -638,8 +671,22 @@ public class VRUIManager : MonoBehaviour
 
     private void ShowPanelAndScheduleHide()
     {
+        if (!CanShowPlaybackPanel())
+        {
+            SetPanelVisibility(false);
+            return;
+        }
+
         SetPanelVisibility(true);
         SchedulePanelHide();
+    }
+
+    private bool CanShowPlaybackPanel()
+    {
+        if (playbackService == null)
+            playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        return playbackService != null && playbackService.HasCurrentMediaOrPlaylistItems();
     }
 
     private void SchedulePanelHide()
@@ -846,13 +893,6 @@ public class VRUIManager : MonoBehaviour
             canvasGroup.blocksRaycasts = false;
         }
 
-        RectTransform overlayRect = loadingOverlay.GetComponent<RectTransform>();
-        if (overlayRect != null)
-        {
-            overlayRect.sizeDelta = new Vector2(LoadingOverlaySize, LoadingOverlaySize);
-            overlayRect.localScale = Vector3.one * LoadingWorldCanvasScale;
-        }
-
         if (loadingSpinnerTransform != null)
             loadingSpinnerTransform.sizeDelta = new Vector2(LoadingSpinnerSize, LoadingSpinnerSize);
 
@@ -915,10 +955,8 @@ public class VRUIManager : MonoBehaviour
             return;
 
         if (visible)
-        {
             loadingOverlay.transform.SetAsLastSibling();
-            UpdateLoadingOverlayPose();
-        }
+
         if (loadingOverlay.activeSelf != visible)
             loadingOverlay.SetActive(visible);
     }
@@ -929,62 +967,8 @@ public class VRUIManager : MonoBehaviour
             return;
 
         EnsureLoadingOverlay();
-        UpdateLoadingOverlayPose();
         if (loadingSpinnerTransform != null)
             loadingSpinnerTransform.Rotate(0f, 0f, LoadingSpinnerDegreesPerSecond * Time.unscaledDeltaTime);
-    }
-
-    private void UpdateLoadingOverlayPose()
-    {
-        if (loadingOverlay == null)
-            return;
-
-        Camera loadingCamera = GetLoadingCamera();
-        if (loadingCamera == null)
-            return;
-
-        Canvas canvas = loadingOverlay.GetComponent<Canvas>();
-        if (canvas != null)
-            canvas.worldCamera = loadingCamera;
-
-        Transform cameraTransform = loadingCamera.transform;
-        Vector3 panelUp = cameraTransform.up;
-        Vector3 panelCenter = cameraTransform.position + cameraTransform.forward;
-        if (GetControlPanelWorldCenter(out Vector3 controlPanelCenter, out Vector3 controlPanelUp))
-        {
-            panelCenter = controlPanelCenter;
-            panelUp = controlPanelUp;
-        }
-
-        Vector3 direction = panelCenter - cameraTransform.position;
-        if (direction.sqrMagnitude < 0.0001f)
-            direction = cameraTransform.forward;
-        direction.Normalize();
-
-        loadingOverlay.transform.position =
-            cameraTransform.position + direction * LoadingDistanceFromCameraMeters + panelUp * LoadingPanelUpOffsetMeters;
-        loadingOverlay.transform.LookAt(cameraTransform.position);
-    }
-
-    private bool GetControlPanelWorldCenter(out Vector3 center, out Vector3 panelUp)
-    {
-        center = Vector3.zero;
-        panelUp = Vector3.up;
-
-        RectTransform controlPanelRect = controlPanel != null ? controlPanel.GetComponent<RectTransform>() : null;
-        if (controlPanelRect == null)
-            return false;
-
-        controlPanelRect.GetWorldCorners(loadingPanelWorldCorners);
-        center = (loadingPanelWorldCorners[0]
-                  + loadingPanelWorldCorners[1]
-                  + loadingPanelWorldCorners[2]
-                  + loadingPanelWorldCorners[3]) * 0.25f;
-
-        panelUp = controlPanelRect.up.sqrMagnitude > 0.0001f
-            ? controlPanelRect.up.normalized
-            : Vector3.up;
-        return true;
     }
 
     private Camera GetLoadingCamera()
@@ -1072,7 +1056,16 @@ public class VRUIManager : MonoBehaviour
         RegisterUiTreeNodes();
     }
 
-    public void TogglePanel() => SetPanelVisibility(!isPanelVisible);
+    public void TogglePanel()
+    {
+        if (!isPanelVisible && !CanShowPlaybackPanel())
+        {
+            SetPanelVisibility(false);
+            return;
+        }
+
+        SetPanelVisibility(!isPanelVisible);
+    }
     public void HidePanel() => SetPanelVisibility(false);
 
     public void OnPlayPauseButtonClicked()
@@ -1083,7 +1076,11 @@ public class VRUIManager : MonoBehaviour
 
     private void OnAudioTrackBtnClicked()
     {
-        if (audioTrackDropdown == null) return;
+        if (audioTrackDropdown == null)
+        {
+            Debug.LogWarning("[VRUIManager][TrackDropdown] audio button return reason=audioTrackDropdownNull");
+            return;
+        }
         if (!IsTrackDropdownOpen(audioTrackDropdown))
             RefreshAudioTracksDropdownFromVlc();
         bool show = ShouldShowTrackDropdown(audioTrackDropdown);
@@ -1095,14 +1092,40 @@ public class VRUIManager : MonoBehaviour
 
     private void OnSubtitleBtnClicked()
     {
-        if (subtitleTrackDropdown == null) return;
+        if (subtitleTrackDropdown == null)
+        {
+            Debug.LogWarning(
+                "[VRUIManager][SubtitlePicker] Subtitle button return reason=subtitleTrackDropdownNull");
+            return;
+        }
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] Subtitle button clicked " +
+            $"dropdown={DescribeUiTarget(subtitleTrackDropdown.gameObject)} " +
+            $"wasOpen={IsTrackDropdownOpen(subtitleTrackDropdown)} " +
+            $"knownTracks={(_openSubtitleTracks != null ? _openSubtitleTracks.Count : -1)}");
         if (!IsTrackDropdownOpen(subtitleTrackDropdown))
+        {
+            Debug.Log("[VRUIManager][SubtitlePicker] RefreshSubtitleTracksDropdownFromVlc because dropdown is closed");
             RefreshSubtitleTracksDropdownFromVlc();
+        }
+        else
+        {
+            Debug.Log("[VRUIManager][SubtitlePicker] RefreshSubtitleTracksDropdownFromVlc skipped because dropdown is already open");
+        }
         bool show = ShouldShowTrackDropdown(subtitleTrackDropdown);
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] Subtitle dropdown refreshed " +
+            $"options={subtitleTrackDropdown.Count} interactable={subtitleTrackDropdown.interactable} " +
+            $"shouldShow={show} list={DescribeUiTarget(subtitleTrackDropdown.ActiveList)}");
         LogTrackDropdownClick("subtitle", subtitleTrackDropdown, show);
         CloseSecondaryPopups(show ? subtitleTrackDropdown.gameObject : null);
         if (show)
             ShowDropdownAboveButton(subtitleTrackDropdown, subtitleBtn);
+        else
+            Debug.Log(
+                $"[VRUIManager][SubtitlePicker] Subtitle button no-show return reason=shouldShowFalse " +
+                $"interactable={subtitleTrackDropdown.interactable} isOpen={subtitleTrackDropdown.IsOpen} " +
+                $"count={subtitleTrackDropdown.Count}");
     }
 
     private void OnBrightnessBtnClicked()
@@ -1112,7 +1135,7 @@ public class VRUIManager : MonoBehaviour
 
     private void OnVolumeBtnClicked()
     {
-        ToggleSystemSlider(SystemSliderMode.Volume, volumeBtn, ReadSystemVolumeNormalized());
+        ToggleSystemSlider(SystemSliderMode.Volume, volumeBtn, ReadVolumePercentNormalized());
     }
 
     private void ToggleSystemSlider(SystemSliderMode mode, Button anchorButton, float normalizedValue)
@@ -1139,9 +1162,13 @@ public class VRUIManager : MonoBehaviour
             return;
 
         _activeSystemSliderMode = mode;
+        ConfigureSystemSliderForMode(mode);
         _isUpdatingSystemSlider = true;
-        systemSlider.SetValueWithoutNotify(Mathf.Clamp01(normalizedValue));
+        float normalized = Mathf.Clamp01(normalizedValue);
+        systemSlider.SetValueWithoutNotify(normalized);
         _isUpdatingSystemSlider = false;
+        UpdateSystemSliderPercentLabel(normalized);
+        UpdateVolumeBoostMarker(mode);
 
         systemSliderPopup.SetActive(true);
         BringPopupToFront(systemSliderPopup);
@@ -1178,7 +1205,164 @@ public class VRUIManager : MonoBehaviour
         }
 
         systemSlider.onValueChanged.AddListener(OnSystemSliderValueChanged);
+        EnsureSystemSliderRuntimeDecorations();
         systemSliderPopup.SetActive(false);
+    }
+
+    private void EnsureSystemSliderRuntimeDecorations()
+    {
+        if (systemSliderPopup == null || systemSlider == null)
+            return;
+
+        if (systemSliderPercentText == null)
+        {
+            var textObject = new GameObject("SystemSliderPercentText", typeof(RectTransform), typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(systemSliderPopup.transform, false);
+
+            RectTransform rect = textObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(96f, SystemSliderPercentTextHeight);
+
+            systemSliderPercentText = textObject.GetComponent<TextMeshProUGUI>();
+            systemSliderPercentText.alignment = TextAlignmentOptions.Center;
+            systemSliderPercentText.color = Color.white;
+            systemSliderPercentText.fontSize = 22f;
+            systemSliderPercentText.enableWordWrapping = false;
+            systemSliderPercentText.raycastTarget = false;
+        }
+
+        if (systemSliderBoostMarker == null)
+        {
+            systemSliderBoostMarker = new GameObject(SystemVolumeBoostMarkerName, typeof(RectTransform), typeof(Image));
+            systemSliderBoostMarker.transform.SetParent(systemSlider.transform, false);
+
+            RectTransform markerRect = systemSliderBoostMarker.GetComponent<RectTransform>();
+            markerRect.anchorMin = new Vector2(0.5f, 0.5f);
+            markerRect.anchorMax = new Vector2(0.5f, 0.5f);
+            markerRect.pivot = new Vector2(0.5f, 0.5f);
+            markerRect.sizeDelta = new Vector2(18f, 2f);
+            markerRect.anchoredPosition = Vector2.zero;
+
+            Image marker = systemSliderBoostMarker.GetComponent<Image>();
+            marker.color = Color.white;
+            marker.raycastTarget = false;
+            systemSliderBoostMarker.SetActive(false);
+        }
+    }
+
+    private void ConfigureSystemSliderForMode(SystemSliderMode mode)
+    {
+        EnsureSystemSliderRuntimeDecorations();
+        if (systemSliderPopup == null || systemSlider == null)
+            return;
+
+        float sliderLength = SystemSliderLength;
+        float popupHeight = SystemSliderPopupHeight;
+        float sliderYOffset = 0f;
+
+        RectTransform popupRect = systemSliderPopup.GetComponent<RectTransform>();
+        if (popupRect != null)
+            popupRect.sizeDelta = new Vector2(SystemSliderPopupWidth, popupHeight);
+
+        LayoutElement popupLayout = systemSliderPopup.GetComponent<LayoutElement>();
+        if (popupLayout != null)
+        {
+            popupLayout.minHeight = popupHeight;
+            popupLayout.preferredHeight = popupHeight;
+        }
+
+        RectTransform sliderRect = systemSlider.GetComponent<RectTransform>();
+        if (sliderRect != null)
+        {
+            sliderRect.sizeDelta = new Vector2(SystemSliderSize, sliderLength);
+            sliderRect.anchoredPosition = new Vector2(0f, sliderYOffset);
+        }
+
+        LayoutElement sliderLayout = systemSlider.GetComponent<LayoutElement>();
+        if (sliderLayout != null)
+        {
+            sliderLayout.minHeight = sliderLength;
+            sliderLayout.preferredHeight = sliderLength;
+        }
+
+        if (systemSliderPercentText != null)
+        {
+            RectTransform textRect = systemSliderPercentText.GetComponent<RectTransform>();
+            textRect.anchoredPosition = new Vector2(0f, SystemSliderPopupHeight * 0.5f + SystemSliderPercentTextGap + SystemSliderPercentTextHeight * 0.5f);
+        }
+
+        UpdateVolumeBoostMarker(mode);
+    }
+
+    private int GetSystemSliderMaxPercent(SystemSliderMode mode)
+    {
+        return mode == SystemSliderMode.Volume && IsAudioBoostEnabled() ? 200 : 100;
+    }
+
+    private bool IsAudioBoostEnabled()
+    {
+        return VlcPlaybackBridge.IsAudioBoostEnabled();
+    }
+
+    private void UpdateSystemSliderPercentLabel(float normalized)
+    {
+        if (systemSliderPercentText == null)
+            return;
+
+        int percent = Mathf.RoundToInt(Mathf.Clamp01(normalized) * GetSystemSliderMaxPercent(_activeSystemSliderMode));
+        systemSliderPercentText.text = $"{percent}%";
+    }
+
+    private void UpdateVolumeBoostMarker(SystemSliderMode mode)
+    {
+        if (systemSliderBoostMarker == null)
+            return;
+
+        systemSliderBoostMarker.SetActive(mode == SystemSliderMode.Volume && IsAudioBoostEnabled());
+    }
+
+    private void HandleSystemSliderStickInput()
+    {
+        if (!IsSystemSliderOpen() || systemSlider == null)
+            return;
+
+        if (!TryGetXrUiTarget(out GameObject target) || !IsSelfOrChildOf(target, systemSliderPopup))
+            return;
+
+        if (!TryGetSystemSliderStickAxis(out float axisY))
+            return;
+
+        if (Mathf.Abs(axisY) < SystemSliderStickThreshold)
+            return;
+
+        int maxPercent = Mathf.Max(1, GetSystemSliderMaxPercent(_activeSystemSliderMode));
+        float delta = axisY * SystemSliderStickPercentPerSecond * Time.deltaTime / maxPercent;
+        systemSlider.value = Mathf.Clamp01(systemSlider.value + delta);
+    }
+
+    private bool TryGetSystemSliderStickAxis(out float axisY)
+    {
+        axisY = 0f;
+        bool hasAxis = false;
+
+        InputDevice leftDevice = InputDevices.GetDeviceAtXRNode(XRNode.LeftHand);
+        if (leftDevice.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 leftAxis))
+        {
+            axisY = leftAxis.y;
+            hasAxis = true;
+        }
+
+        InputDevice rightDevice = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        if (rightDevice.TryGetFeatureValue(CommonUsages.primary2DAxis, out Vector2 rightAxis) &&
+            (!hasAxis || Mathf.Abs(rightAxis.y) > Mathf.Abs(axisY)))
+        {
+            axisY = rightAxis.y;
+            hasAxis = true;
+        }
+
+        return hasAxis;
     }
 
     private void OnSystemSliderValueChanged(float value)
@@ -1188,9 +1372,15 @@ public class VRUIManager : MonoBehaviour
 
         float normalized = Mathf.Clamp01(value);
         if (_activeSystemSliderMode == SystemSliderMode.Brightness)
+        {
             SetScreenBrightnessNormalized(normalized);
+        }
         else if (_activeSystemSliderMode == SystemSliderMode.Volume)
-            SetSystemVolumeNormalized(normalized);
+        {
+            SetVolumePercentNormalized(normalized);
+        }
+
+        UpdateSystemSliderPercentLabel(normalized);
     }
 
     private bool IsSystemSliderOpen()
@@ -1412,13 +1602,13 @@ public class VRUIManager : MonoBehaviour
 
         CreateGeometrySectionLabel(menu.transform, "投影模式");
         Transform projectionRow = CreateGeometryRow(menu.transform, "ProjectionRow");
+        _projectionFlatButton = CreateGeometryOptionButton(projectionRow, "平面", () => SetGeometryProjection(XRVLC.VideoProjection.Flat));
         _projection180Button = CreateGeometryOptionButton(projectionRow, "180全景", () => SetGeometryProjection(XRVLC.VideoProjection.Sphere180));
         _projection360Button = CreateGeometryOptionButton(projectionRow, "360全景", () => SetGeometryProjection(XRVLC.VideoProjection.Sphere360));
-        _projectionFlatButton = CreateGeometryOptionButton(projectionRow, "平面", () => SetGeometryProjection(XRVLC.VideoProjection.Flat));
 
         CreateGeometrySectionLabel(menu.transform, "3D 格式");
         Transform stereoRow = CreateGeometryRow(menu.transform, "StereoRow");
-        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, "平面左右眼划分", () => SetGeometryStereo(XRVLC.StereoMode.Mono));
+        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, "无3D", () => SetGeometryStereo(XRVLC.StereoMode.Mono));
         _stereoTopBottomButton = CreateGeometryOptionButton(stereoRow, "上下3D", () => SetGeometryStereo(XRVLC.StereoMode.TopBottom));
         _stereoLeftRightButton = CreateGeometryOptionButton(stereoRow, "左右3D", () => SetGeometryStereo(XRVLC.StereoMode.LeftRight));
 
@@ -1684,7 +1874,14 @@ public class VRUIManager : MonoBehaviour
 
     private void ShowDropdownAboveButton(XrDropdown dropdown, Button anchorButton)
     {
-        if (dropdown == null || anchorButton == null) return;
+        if (dropdown == null || anchorButton == null)
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][TrackDropdown] show return reason={(dropdown == null ? "dropdownNull" : "anchorButtonNull")} " +
+                $"dropdown={DescribeUiTarget(dropdown != null ? dropdown.gameObject : null)} " +
+                $"anchor={DescribeUiTarget(anchorButton != null ? anchorButton.gameObject : null)}");
+            return;
+        }
         if (dropdown == audioTrackDropdown || dropdown == subtitleTrackDropdown)
             ConfigureSecondaryDropdown(dropdown, false);
         if (!dropdown.interactable)
@@ -1709,6 +1906,9 @@ public class VRUIManager : MonoBehaviour
             if (_pendingTrackDropdownShow != null)
                 StopCoroutine(_pendingTrackDropdownShow);
             _pendingTrackDropdownShow = StartCoroutine(ShowDropdownAfterActivation(dropdown, anchorButton));
+            Debug.Log(
+                $"[VRUIManager][TrackDropdown] show return reason=deferredUntilActive " +
+                $"dropdown={DescribeUiTarget(dropdown.gameObject)} anchor={DescribeUiTarget(anchorButton.gameObject)}");
             RegisterUiTreeNodes();
             return;
         }
@@ -1724,10 +1924,30 @@ public class VRUIManager : MonoBehaviour
         _pendingTrackDropdownShow = null;
 
         if (dropdown == null || anchorButton == null || !dropdown.gameObject.activeInHierarchy || !dropdown.interactable)
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][TrackDropdown] deferredShow return reason={DescribeDeferredShowReturnReason(dropdown, anchorButton)} " +
+                $"dropdown={DescribeUiTarget(dropdown != null ? dropdown.gameObject : null)} " +
+                $"anchor={DescribeUiTarget(anchorButton != null ? anchorButton.gameObject : null)} " +
+                $"interactable={dropdown != null && dropdown.interactable}");
             yield break;
+        }
 
         ShowPreparedDropdown(dropdown, anchorButton);
         RegisterUiTreeNodes();
+    }
+
+    private static string DescribeDeferredShowReturnReason(XrDropdown dropdown, Button anchorButton)
+    {
+        if (dropdown == null)
+            return "dropdownNull";
+        if (anchorButton == null)
+            return "anchorButtonNull";
+        if (!dropdown.gameObject.activeInHierarchy)
+            return "dropdownInactiveInHierarchy";
+        if (!dropdown.interactable)
+            return "notInteractable";
+        return "unknown";
     }
 
     private void ShowPreparedDropdown(XrDropdown dropdown, Button anchorButton)
@@ -1746,14 +1966,24 @@ public class VRUIManager : MonoBehaviour
 
     private void CloseDropdownIfNotExcept(XrDropdown dropdown, GameObject except)
     {
-        if (dropdown == null || dropdown.gameObject == except) return;
+        if (dropdown == null || dropdown.gameObject == except)
+        {
+            Debug.Log(
+                $"[VRUIManager][TrackDropdown] closeIfNotExcept return " +
+                $"reason={(dropdown == null ? "dropdownNull" : "isExcept")} except={DescribeUiTarget(except)}");
+            return;
+        }
 
         CloseTrackDropdown(dropdown);
     }
 
     private static bool CloseTrackDropdown(XrDropdown dropdown)
     {
-        if (dropdown == null) return false;
+        if (dropdown == null)
+        {
+            Debug.Log("[VRUIManager][TrackDropdown] close return result=False reason=dropdownNull");
+            return false;
+        }
 
         bool wasOpen = dropdown.gameObject.activeSelf || dropdown.IsOpen;
         bool hadList = ActiveDropdownList(dropdown) != null;
@@ -2061,15 +2291,15 @@ public class VRUIManager : MonoBehaviour
         SetButtonIcon(previousBtn, "previous", AdjacentPlaybackIconSize);
         SetButtonIcon(nextBtn, "next", AdjacentPlaybackIconSize);
         SetButtonIcon(playlistToggleBtn, "playlist", 32f);
-        SetButtonIcon(exitBtn, "exit", 32f);
+        SetButtonIcon(exitBtn, "home", 32f);
         SetButtonIcon(lockBtn, "lock", 30f);
         SetButtonIcon(brightnessBtn, "brightness", 32f);
-        SetButtonIcon(volumeBtn, "volume", 32f);
+        SetButtonIcon(volumeBtn, "volume-notice", 32f);
         SetButtonIcon(equalizerBtn, "equalizer", 32f);
         SetButtonIcon(subtitleBtn, "subtitle", 32f);
         SetButtonIcon(seeThroughBtn, "sphere", 32f);
-        SetButtonIcon(threeDBtn, "stereo3d", 32f);
-        SetButtonIcon(settingsBtn, "settings", 32f);
+        SetButtonIcon(threeDBtn, "vr-glasses", 32f);
+        SetButtonIcon(settingsBtn, "setting-two", 32f);
     }
 
     private void ConfigureUiCanvasClarity()
@@ -2085,6 +2315,63 @@ public class VRUIManager : MonoBehaviour
             return;
 
         scaler.dynamicPixelsPerUnit = Mathf.Max(scaler.dynamicPixelsPerUnit, MinWorldCanvasDynamicPixelsPerUnit);
+    }
+
+    private void ConfigureUiTextEdgeClarity()
+    {
+        Transform root = GetUiClarityRoot();
+        if (root == null)
+            return;
+
+        TextMeshProUGUI[] texts = root.GetComponentsInChildren<TextMeshProUGUI>(true);
+        foreach (TextMeshProUGUI text in texts)
+            ConfigureTextEdgeClarity(text);
+    }
+
+    private Transform GetUiClarityRoot()
+    {
+        Canvas canvas = controlPanel != null
+            ? controlPanel.GetComponentInParent<Canvas>(true)
+            : GetComponentInParent<Canvas>(true);
+        return canvas != null ? canvas.transform : transform;
+    }
+
+    private static void ConfigureTextEdgeClarity(TextMeshProUGUI text)
+    {
+        if (text == null)
+            return;
+
+        Material material = text.fontMaterial;
+        if (material == null)
+            return;
+
+        ConfigureTextMaterialForClarity(material);
+        text.fontMaterial = material;
+        text.UpdateMeshPadding();
+    }
+
+    private static void ConfigureTextMaterialForClarity(Material material)
+    {
+        if (material == null)
+            return;
+
+        SetTextMaterialFloat(material, "_Sharpness", UiTextSharpness);
+        SetTextMaterialFloat(material, "_FaceDilate", 0f);
+        SetTextMaterialFloat(material, "_OutlineWidth", 0f);
+        SetTextMaterialFloat(material, "_UnderlayDilate", 0f);
+        SetTextMaterialFloat(material, "_UnderlaySoftness", 0f);
+        SetTextMaterialFloat(material, "_GlowPower", 0f);
+        SetTextMaterialFloat(material, "_GlowOuter", 0f);
+        material.DisableKeyword("OUTLINE_ON");
+        material.DisableKeyword("UNDERLAY_ON");
+        material.DisableKeyword("UNDERLAY_INNER");
+        material.DisableKeyword("GLOW_ON");
+    }
+
+    private static void SetTextMaterialFloat(Material material, string propertyName, float value)
+    {
+        if (material != null && material.HasProperty(propertyName))
+            material.SetFloat(propertyName, value);
     }
 
     private void UpdatePlayButtonIcon(XRVLC.Media.PlayerStatus status)
@@ -2238,6 +2525,9 @@ public class VRUIManager : MonoBehaviour
             progressSlider.value = (float)timeMs / totalTimeMs;
             _isUpdatingSlider = false;
         }
+
+        if (progressHoverTimeBubble != null)
+            progressHoverTimeBubble.SetDuration(totalTimeMs);
     }
 
     private string FormatTime(long ms)
@@ -2252,6 +2542,18 @@ public class VRUIManager : MonoBehaviour
     {
         if (_isUpdatingSlider) return;
         playbackService?.SeekToPosition(val);
+    }
+
+    private void EnsureProgressHoverTimeBubble()
+    {
+        if (progressSlider == null)
+            return;
+
+        progressHoverTimeBubble = progressSlider.gameObject.GetComponent<ProgressHoverTimeBubble>();
+        if (progressHoverTimeBubble == null)
+            progressHoverTimeBubble = progressSlider.gameObject.AddComponent<ProgressHoverTimeBubble>();
+
+        progressHoverTimeBubble.Bind(progressSlider);
     }
 
     public void OnSpeedBtnClicked()
@@ -2317,37 +2619,157 @@ public class VRUIManager : MonoBehaviour
             return;
 
         _nextSystemStatusRefreshTime = Time.unscaledTime + SystemStatusRefreshInterval;
-        if (batteryText == null)
-            return;
-
         int batteryPercent = ReadBatteryPercent();
-        string batteryLabel = batteryPercent >= 0 ? batteryPercent.ToString() : "--";
-        batteryText.text = batteryLabel;
-        SetBatteryIconSprite(batteryPercent);
+        if (batteryText != null)
+        {
+            string batteryLabel = batteryPercent >= 0 ? batteryPercent.ToString() : "--";
+            batteryText.text = batteryLabel;
+            ConfigureBatteryTextNoOutline();
+        }
+
+        SetBatteryVisuals(batteryPercent);
     }
 
-    private void SetBatteryIconSprite(int batteryPercent)
+    private void SetBatteryVisuals(int batteryPercent)
     {
         if (batteryIcon == null)
             return;
 
-        string iconName = ResolveBatteryIconName(batteryPercent);
-        Sprite sprite = LoadIconWithFallback(iconName, BatteryUnknownIcon);
+        Sprite sprite = LoadIconWithFallback(BatteryShellIcon, BatteryShellIcon);
         if (sprite != null)
             batteryIcon.sprite = sprite;
+
+        batteryFill = EnsureBatteryFillImage();
+        if (batteryFill == null)
+            return;
+
+        Rect contentRect = GetBatteryBodyContentRect();
+        LayoutBatteryStatusText(contentRect);
+
+        batteryFill.gameObject.SetActive(batteryPercent >= 0);
+        if (batteryPercent < 0)
+            return;
+
+        float normalized = Mathf.Clamp01(batteryPercent / 100f);
+        batteryFill.color = batteryPercent < BatteryLowThresholdPercent ? BatteryLowFillColor : BatteryNormalFillColor;
+        RectTransform fillRect = batteryFill.rectTransform;
+        LayoutBatteryFill(fillRect, normalized);
     }
 
-    private static string ResolveBatteryIconName(int batteryPercent)
+    private Image EnsureBatteryFillImage()
     {
-        if (batteryPercent < 0)
-            return BatteryUnknownIcon;
-        if (batteryPercent <= 10)
-            return BatteryEmptyIcon;
-        if (batteryPercent <= 35)
-            return BatteryLowIcon;
-        if (batteryPercent <= 70)
-            return BatteryMediumIcon;
-        return BatteryFullIcon;
+        if (batteryFill != null)
+            return batteryFill;
+        if (batteryIcon == null)
+            return null;
+
+        Transform fillParent = batteryIcon.transform.parent != null ? batteryIcon.transform.parent : batteryIcon.transform;
+        Transform existing = fillParent.Find(BatteryFillObjectName);
+        GameObject fillObject = existing != null
+            ? existing.gameObject
+            : new GameObject(BatteryFillObjectName, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+
+        fillObject.transform.SetParent(fillParent, false);
+        fillObject.transform.SetAsFirstSibling();
+
+        batteryFill = fillObject.GetComponent<Image>();
+        batteryFill.sprite = null;
+        batteryFill.color = BatteryNormalFillColor;
+        batteryFill.raycastTarget = false;
+
+        LayoutBatteryFill(batteryFill.rectTransform, 0f);
+        return batteryFill;
+    }
+
+    private void LayoutBatteryFill(RectTransform fillRect, float normalized)
+    {
+        if (fillRect == null || batteryIcon == null)
+            return;
+
+        Rect contentRect = GetBatteryBodyContentRect();
+        float maxWidth = Mathf.Max(0f, contentRect.width);
+        float fillWidth = maxWidth * Mathf.Clamp01(normalized);
+        float fillHeight = Mathf.Max(0f, contentRect.height);
+
+        RectTransform iconRect = batteryIcon.rectTransform;
+        fillRect.anchorMin = iconRect.anchorMin;
+        fillRect.anchorMax = iconRect.anchorMax;
+        fillRect.pivot = new Vector2(0f, 0.5f);
+        fillRect.anchoredPosition = new Vector2(contentRect.xMin, contentRect.center.y);
+        fillRect.sizeDelta = new Vector2(fillWidth, fillHeight);
+    }
+
+    private Rect GetBatteryBodyContentRect()
+    {
+        if (batteryIcon == null)
+            return Rect.zero;
+
+        RectTransform iconRect = batteryIcon.rectTransform;
+        Rect spriteRect = GetPreservedAspectSpriteRect(iconRect);
+        float innerWidth = spriteRect.width * (BatteryBodyInnerMaxX - BatteryBodyInnerMinX);
+        float innerHeight = spriteRect.height * BatteryBodyInnerHeightRatio;
+        float innerCenterX = spriteRect.xMin + spriteRect.width * ((BatteryBodyInnerMinX + BatteryBodyInnerMaxX) * 0.5f);
+        return new Rect(
+            innerCenterX - innerWidth * 0.5f,
+            spriteRect.center.y - innerHeight * 0.5f,
+            innerWidth,
+            innerHeight);
+    }
+
+    private Rect GetPreservedAspectSpriteRect(RectTransform iconRect)
+    {
+        Vector2 rectSize = iconRect.rect.size;
+        if (rectSize.x <= 0f)
+            rectSize.x = iconRect.sizeDelta.x;
+        if (rectSize.y <= 0f)
+            rectSize.y = iconRect.sizeDelta.y;
+
+        Vector2 renderedSize = rectSize;
+        Sprite sprite = batteryIcon != null ? batteryIcon.sprite : null;
+        if (sprite != null && rectSize.x > 0f && rectSize.y > 0f)
+        {
+            float spriteAspect = sprite.rect.width / sprite.rect.height;
+            float rectAspect = rectSize.x / rectSize.y;
+            if (spriteAspect > rectAspect)
+                renderedSize.y = rectSize.x / spriteAspect;
+            else
+                renderedSize.x = rectSize.y * spriteAspect;
+        }
+
+        Vector2 center = iconRect.anchoredPosition + new Vector2(
+            (0.5f - iconRect.pivot.x) * rectSize.x,
+            (0.5f - iconRect.pivot.y) * rectSize.y);
+        return new Rect(center - renderedSize * 0.5f, renderedSize);
+    }
+
+    private void LayoutBatteryStatusText(Rect contentRect)
+    {
+        if (batteryText == null)
+            return;
+
+        RectTransform textRect = batteryText.rectTransform;
+        RectTransform iconRect = batteryIcon != null ? batteryIcon.rectTransform : null;
+        if (iconRect != null)
+        {
+            textRect.anchorMin = iconRect.anchorMin;
+            textRect.anchorMax = iconRect.anchorMax;
+        }
+
+        textRect.pivot = new Vector2(0.5f, 0.5f);
+        textRect.anchoredPosition = contentRect.center;
+        textRect.sizeDelta = contentRect.size;
+    }
+
+    private void ConfigureBatteryTextNoOutline()
+    {
+        if (batteryText != null)
+        {
+            batteryText.fontSize = BatteryStatusFontSize;
+            batteryText.fontSizeMin = BatteryStatusFontSize;
+            batteryText.fontSizeMax = BatteryStatusFontSize;
+        }
+
+        ConfigureTextEdgeClarity(batteryText);
     }
 
     private static int ReadBatteryPercent()
@@ -2405,6 +2827,24 @@ public class VRUIManager : MonoBehaviour
         return _simulatedVolume;
     }
 
+    private float ReadVolumePercentNormalized()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            int maxPercent = GetSystemSliderMaxPercent(SystemSliderMode.Volume);
+            int percent = Mathf.Clamp(VlcPlaybackBridge.GetVolumePercent(), 0, maxPercent);
+            _simulatedVolume = Mathf.Clamp01((float)percent / maxPercent);
+            return _simulatedVolume;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[VRUIManager] 读取 VLC 音量增益失败: {e.Message}");
+        }
+#endif
+        return _simulatedVolume;
+    }
+
     private void SetSystemVolumeNormalized(float value)
     {
         _simulatedVolume = Mathf.Clamp01(value);
@@ -2426,6 +2866,15 @@ public class VRUIManager : MonoBehaviour
         {
             Debug.LogWarning($"[VRUIManager] 设置系统音量失败: {e.Message}");
         }
+#endif
+    }
+
+    private void SetVolumePercentNormalized(float value)
+    {
+        _simulatedVolume = Mathf.Clamp01(value);
+        int percent = Mathf.RoundToInt(_simulatedVolume * GetSystemSliderMaxPercent(SystemSliderMode.Volume));
+#if UNITY_ANDROID && !UNITY_EDITOR
+        VlcPlaybackBridge.SetVolumePercent(percent);
 #endif
     }
 
@@ -2517,19 +2966,33 @@ public class VRUIManager : MonoBehaviour
 
     private void RefreshSubtitleTracksDropdownFromVlc()
     {
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] RefreshSubtitleTracksDropdownFromVlc entry " +
+            $"playbackServiceNull={playbackService == null}");
         XRVLC.Media.TrackSnapshot snapshot = playbackService != null
             ? playbackService.GetSubtitleTrackSnapshotFromVlc()
             : new XRVLC.Media.TrackSnapshot();
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] RefreshSubtitleTracksDropdownFromVlc snapshot " +
+            $"trackCount={(snapshot.SubtitleTracks != null ? snapshot.SubtitleTracks.Count : -1)}");
         UpdateSubtitleTracksDropdown(snapshot.SubtitleTracks);
     }
 
     private void UpdateAudioTracksDropdown(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
     {
         _openAudioTracks = tracks ?? new System.Collections.Generic.List<XRVLC.Media.TrackInfo>();
-        if (audioTrackDropdown == null) return;
+        if (audioTrackDropdown == null)
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][TrackDropdown] updateAudio return reason=audioTrackDropdownNull " +
+                $"trackCount={_openAudioTracks.Count}");
+            return;
+        }
         if (_openAudioTracks.Count == 0)
         {
             audioTrackDropdown.SetPlaceholder("无音轨");
+            Debug.Log(
+                "[VRUIManager][TrackDropdown] updateAudio return reason=noAudioTracks");
             return;
         }
         audioTrackDropdown.SetInteractable(true);
@@ -2537,7 +3000,10 @@ public class VRUIManager : MonoBehaviour
         int selectedIndex = ResolveSelectedTrackIndex(_openAudioTracks, true);
         for (int i = 0; i < _openAudioTracks.Count; i++)
         {
-            options.Add(new XrDropdownItemData(_openAudioTracks[i].Name));
+            options.Add(new XrDropdownItemData(
+                _openAudioTracks[i].Name,
+                payload: _openAudioTracks[i].Id,
+                onSelected: OnAudioTrackItemSelected));
         }
         audioTrackDropdown.SetItems(options, selectedIndex);
     }
@@ -2545,16 +3011,40 @@ public class VRUIManager : MonoBehaviour
     private void UpdateSubtitleTracksDropdown(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks)
     {
         _openSubtitleTracks = tracks ?? new System.Collections.Generic.List<XRVLC.Media.TrackInfo>();
-        if (subtitleTrackDropdown == null) return;
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] UpdateSubtitleTracksDropdown entry " +
+            $"inputNull={tracks == null} openCount={_openSubtitleTracks.Count} " +
+            $"dropdownNull={subtitleTrackDropdown == null}");
+        if (subtitleTrackDropdown == null)
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][SubtitlePicker] UpdateSubtitleTracksDropdown return reason=subtitleTrackDropdownNull " +
+                $"openCount={_openSubtitleTracks.Count}");
+            return;
+        }
         subtitleTrackDropdown.SetInteractable(true);
         var options = new System.Collections.Generic.List<XrDropdownItemData>();
         int selectedIndex = _openSubtitleTracks.Count > 0 ? ResolveSelectedTrackIndex(_openSubtitleTracks, false) + 1 : 0;
-        options.Add(new XrDropdownItemData(ChooseSubtitleTrackOptionLabel, showBottomSeparator: true));
+        options.Add(new XrDropdownItemData(
+            ChooseSubtitleTrackOptionLabel,
+            showBottomSeparator: true,
+            onSelected: OnChooseSubtitleTrackItemSelected));
         for (int i = 0; i < _openSubtitleTracks.Count; i++)
         {
-            options.Add(new XrDropdownItemData(GetSubtitleTrackDisplayNameForMedia(_openSubtitleTracks[i], playbackService?.CurrentMedia)));
+            options.Add(new XrDropdownItemData(
+                GetSubtitleTrackDisplayNameForMedia(_openSubtitleTracks[i], playbackService?.CurrentMedia),
+                payload: _openSubtitleTracks[i].Id,
+                onSelected: OnSubtitleTrackItemSelected));
         }
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] UpdateSubtitleTracksDropdown setItems " +
+            $"options={options.Count} selectedIndex={selectedIndex} itemHandlers=True " +
+            $"{subtitleTrackDropdown.DescribeValueChangedEventForLog()}");
         subtitleTrackDropdown.SetItems(options, selectedIndex);
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] UpdateSubtitleTracksDropdown exit " +
+            $"options={subtitleTrackDropdown.Count} value={subtitleTrackDropdown.Value} " +
+            $"{subtitleTrackDropdown.DescribeValueChangedEventForLog()}");
     }
 
     private static int ResolveSelectedTrackIndex(System.Collections.Generic.List<XRVLC.Media.TrackInfo> tracks, bool preferFirstEnabledWhenDisabled)
@@ -2724,28 +3214,101 @@ public class VRUIManager : MonoBehaviour
     {
         if (_openAudioTracks != null && dropdownIndex >= 0 && dropdownIndex < _openAudioTracks.Count)
         {
-            XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetAudioTrack(_openAudioTracks[dropdownIndex].Id)
-                ?? new XRVLC.Media.TrackSnapshot();
-            UpdateAudioTracksDropdown(snapshot.AudioTracks);
+            SelectAudioTrackById(_openAudioTracks[dropdownIndex].Id, dropdownIndex, _openAudioTracks[dropdownIndex].Name);
+            return;
         }
+
+        Debug.LogWarning(
+            $"[VRUIManager][TrackDropdown] OnAudioTrackSelected return reason=invalidAudioIndex " +
+            $"dropdownIndex={dropdownIndex} openAudioTracks={(_openAudioTracks != null ? _openAudioTracks.Count : -1)}");
+    }
+
+    private void OnAudioTrackItemSelected(int dropdownIndex, XrDropdownItemData item)
+    {
+        SelectAudioTrackById(item?.payload as string, dropdownIndex, item?.primaryText);
+    }
+
+    private void SelectAudioTrackById(string trackId, int dropdownIndex, string label)
+    {
+        if (string.IsNullOrEmpty(trackId))
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][TrackDropdown] SelectAudioTrackById return reason=missingTrackId " +
+                $"dropdownIndex={dropdownIndex} label={label}");
+            return;
+        }
+
+        Debug.Log(
+            $"[VRUIManager][TrackDropdown] SelectAudioTrackById trackId={trackId} " +
+            $"dropdownIndex={dropdownIndex} label={label}");
+        XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetAudioTrack(trackId)
+            ?? new XRVLC.Media.TrackSnapshot();
+        UpdateAudioTracksDropdown(snapshot.AudioTracks);
+    }
+
+    private void OnChooseSubtitleTrackItemSelected(int dropdownIndex, XrDropdownItemData item)
+    {
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] ChooseSubtitleTrackItemSelected dropdownIndex={dropdownIndex} " +
+            $"label={item?.primaryText}");
+        OnSubtitleTrackSelected(0);
+    }
+
+    private void OnSubtitleTrackItemSelected(int dropdownIndex, XrDropdownItemData item)
+    {
+        SelectSubtitleTrackById(item?.payload as string, dropdownIndex, item?.primaryText);
+    }
+
+    private void SelectSubtitleTrackById(string trackId, int dropdownIndex, string label)
+    {
+        if (string.IsNullOrEmpty(trackId))
+        {
+            Debug.LogWarning(
+                $"[VRUIManager][SubtitlePicker] SelectSubtitleTrackById return reason=missingTrackId " +
+                $"dropdownIndex={dropdownIndex} label={label}");
+            return;
+        }
+
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] SelectSubtitleTrackById trackId={trackId} " +
+            $"dropdownIndex={dropdownIndex} label={label}");
+        XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetSubtitleTrack(trackId)
+            ?? new XRVLC.Media.TrackSnapshot();
+        UpdateSubtitleTracksDropdown(snapshot.SubtitleTracks);
     }
 
     private void OnSubtitleTrackSelected(int dropdownIndex)
     {
+        Debug.Log(
+            $"[VRUIManager][SubtitlePicker] OnSubtitleTrackSelected index={dropdownIndex} " +
+            $"openSubtitleTracks={(_openSubtitleTracks != null ? _openSubtitleTracks.Count : -1)}");
+
         if (dropdownIndex == 0)
         {
+            Debug.Log("[VRUIManager][SubtitlePicker] Opening picker from choose-other-subtitle row");
             CloseSecondaryPopups();
             VlcPlaybackBridge.OpenSubtitlePicker();
+            Debug.Log("[VRUIManager][SubtitlePicker] OnSubtitleTrackSelected return reason=chooseOtherSubtitle");
             return;
         }
 
         int trackIndex = dropdownIndex - 1;
         if (_openSubtitleTracks != null && trackIndex >= 0 && trackIndex < _openSubtitleTracks.Count)
         {
-            XRVLC.Media.TrackSnapshot snapshot = playbackService?.SetSubtitleTrack(_openSubtitleTracks[trackIndex].Id)
-                ?? new XRVLC.Media.TrackSnapshot();
-            UpdateSubtitleTracksDropdown(snapshot.SubtitleTracks);
+            SelectSubtitleTrackById(
+                _openSubtitleTracks[trackIndex].Id,
+                dropdownIndex,
+                GetSubtitleTrackDisplayNameForMedia(_openSubtitleTracks[trackIndex], playbackService?.CurrentMedia));
+            Debug.Log(
+                $"[VRUIManager][SubtitlePicker] OnSubtitleTrackSelected return reason=existingSubtitleSelected " +
+                $"dropdownIndex={dropdownIndex} trackIndex={trackIndex}");
+            return;
         }
+
+        Debug.LogWarning(
+            $"[VRUIManager][SubtitlePicker] OnSubtitleTrackSelected return reason=invalidSubtitleIndex " +
+            $"dropdownIndex={dropdownIndex} trackIndex={trackIndex} " +
+            $"openSubtitleTracks={(_openSubtitleTracks != null ? _openSubtitleTracks.Count : -1)}");
     }
 
     public void OnPreviousBtnClicked()

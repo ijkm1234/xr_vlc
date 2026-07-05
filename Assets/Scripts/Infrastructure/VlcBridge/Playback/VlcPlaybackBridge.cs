@@ -12,6 +12,7 @@ using XRVLC.Media;
 public class VlcPlaybackBridge : MonoBehaviour
 {
     private const string BridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
+    private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
     private static VlcPlaybackBridge _instance;
     public static VlcPlaybackSnapshot Snapshot { get; } = new VlcPlaybackSnapshot();
 
@@ -50,6 +51,22 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
     }
 
+    private static void SurfaceDebug(string message)
+    {
+        Debug.Log($"[{SurfaceDebugTag}] bridge {message}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass log = new AndroidJavaClass("android.util.Log"))
+                log.CallStatic<int>("e", SurfaceDebugTag, $"bridge {message}");
+        }
+        catch
+        {
+            // Diagnostics must never affect JNI playback calls.
+        }
+#endif
+    }
+
     public static void PublishPlaybackRate(float rate)
     {
         if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
@@ -65,6 +82,11 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void PreloadLocation(string payload)
     {
+        bool payloadIsJson = payload != null && payload.TrimStart().StartsWith("{", StringComparison.Ordinal);
+        SurfaceDebug(
+            $"preload_location enter payloadNull={payload == null} " +
+            $"payloadLength={(payload == null ? 0 : payload.Length)} " +
+            $"payloadIsJson={payloadIsJson}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -72,11 +94,13 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("preloadLocation", payload);
                 Debug.Log($"[VlcPlaybackBridge] PreloadLocation called for: {payload}");
+                SurfaceDebug("preload_location android_call_returned");
             }
         }
         catch (System.Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] PreloadLocation failed: {e.Message}");
+            SurfaceDebug($"preload_location failed exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] PreloadLocation is only supported on Android devices.");
@@ -85,38 +109,49 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void SetSurface(IntPtr surfacePtr)
     {
+        SurfaceDebug($"set_video_surface enter surface={surfacePtr} isZero={surfacePtr == IntPtr.Zero}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
-            if (AndroidJNI.AttachCurrentThread() != 0)
+            int attachResult = AndroidJNI.AttachCurrentThread();
+            SurfaceDebug($"set_video_surface attach_thread result={attachResult}");
+            if (attachResult != 0)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to attach JNI thread");
+                SurfaceDebug("set_video_surface failed attach_thread");
                 return;
             }
 
             IntPtr bridgeClass = AndroidJNI.FindClass("org/videolan/vlc/bridge/PlaybackServiceBridge");
+            SurfaceDebug($"set_video_surface find_class class={bridgeClass}");
             if (bridgeClass == IntPtr.Zero)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to find PlaybackServiceBridge class");
+                SurfaceDebug("set_video_surface failed find_class");
                 return;
             }
 
             IntPtr setSurfaceMethod = AndroidJNI.GetStaticMethodID(bridgeClass, "setVideoSurface", "(Landroid/view/Surface;)V");
+            SurfaceDebug($"set_video_surface get_method method={setSurfaceMethod}");
             if (setSurfaceMethod == IntPtr.Zero)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to find setVideoSurface method");
+                SurfaceDebug("set_video_surface failed get_method");
                 return;
             }
 
             jvalue[] args = new jvalue[1];
             args[0].l = surfacePtr;
+            SurfaceDebug($"set_video_surface call_static_void surface={surfacePtr}");
             AndroidJNI.CallStaticVoidMethod(bridgeClass, setSurfaceMethod, args);
             
             Debug.Log("[VlcPlaybackBridge] SetSurface called successfully");
+            SurfaceDebug($"set_video_surface returned surface={surfacePtr}");
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] SetSurface failed: {e.Message}");
+            SurfaceDebug($"set_video_surface exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetSurface is only supported on Android device.");
@@ -125,6 +160,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void DetachSurface()
     {
+        SurfaceDebug("detach_video_surface enter");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -132,11 +168,13 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("setVideoSurface", (AndroidJavaObject)null);
                 Debug.Log("[VlcPlaybackBridge] DetachSurface called");
+                SurfaceDebug("detach_video_surface android_call_returned");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] DetachSurface failed: {e.Message}");
+            SurfaceDebug($"detach_video_surface exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] DetachSurface is only supported on Android device.");
@@ -145,6 +183,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void SetSubtitleSurface(IntPtr surfacePtr)
     {
+        SurfaceDebug($"set_subtitle_surface enter surface={surfacePtr} isZero={surfacePtr == IntPtr.Zero}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -154,36 +193,46 @@ public class VlcPlaybackBridge : MonoBehaviour
                 Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurface called with zero surface pointer");
             }
 
-            if (AndroidJNI.AttachCurrentThread() != 0)
+            int attachResult = AndroidJNI.AttachCurrentThread();
+            SurfaceDebug($"set_subtitle_surface attach_thread result={attachResult}");
+            if (attachResult != 0)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to attach JNI thread for subtitle surface");
+                SurfaceDebug("set_subtitle_surface failed attach_thread");
                 return;
             }
 
             IntPtr bridgeClass = AndroidJNI.FindClass("org/videolan/vlc/bridge/PlaybackServiceBridge");
+            SurfaceDebug($"set_subtitle_surface find_class class={bridgeClass}");
             if (bridgeClass == IntPtr.Zero)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to find PlaybackServiceBridge class");
+                SurfaceDebug("set_subtitle_surface failed find_class");
                 return;
             }
 
             IntPtr setSubtitleSurfaceMethod = AndroidJNI.GetStaticMethodID(bridgeClass, "setSubtitleSurface", "(Landroid/view/Surface;)V");
+            SurfaceDebug($"set_subtitle_surface get_method method={setSubtitleSurfaceMethod}");
             if (setSubtitleSurfaceMethod == IntPtr.Zero)
             {
                 Debug.LogError("[VlcPlaybackBridge] Failed to find setSubtitleSurface method");
+                SurfaceDebug("set_subtitle_surface failed get_method");
                 return;
             }
 
             jvalue[] args = new jvalue[1];
             args[0].l = surfacePtr;
             Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurface JNI invoking Android bridge: class={bridgeClass}, method={setSubtitleSurfaceMethod}, surface={surfacePtr}");
+            SurfaceDebug($"set_subtitle_surface call_static_void surface={surfacePtr}");
             AndroidJNI.CallStaticVoidMethod(bridgeClass, setSubtitleSurfaceMethod, args);
 
             Debug.Log($"[VlcPlaybackBridge] SetSubtitleSurface JNI call returned: surface={surfacePtr}");
+            SurfaceDebug($"set_subtitle_surface returned surface={surfacePtr}");
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] SetSubtitleSurface failed: {e}");
+            SurfaceDebug($"set_subtitle_surface exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleSurface is only supported on Android device.");
@@ -618,6 +667,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void OpenSubtitlePicker()
     {
+        Debug.Log("[VlcPlaybackBridge] OpenSubtitlePicker entry");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -678,6 +728,106 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetAudioChannelMode is only supported on Android device.");
+#endif
+    }
+
+    public static bool ShouldMixAudioToMono()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                return bridge.CallStatic<bool>("shouldMixAudioToMono");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] ShouldMixAudioToMono failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] ShouldMixAudioToMono is only supported on Android device.");
+#endif
+        return false;
+    }
+
+    public static bool IsAudioBoostEnabled()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                return bridge.CallStatic<bool>("isAudioBoostEnabled");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] IsAudioBoostEnabled failed: {e.Message}");
+            return true;
+        }
+#else
+        return true;
+#endif
+    }
+
+    public static void SetAudioBoostEnabled(bool enabled)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setAudioBoostEnabled", enabled);
+                Debug.Log($"[VlcPlaybackBridge] SetAudioBoostEnabled called with enabled: {enabled}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetAudioBoostEnabled failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetAudioBoostEnabled is only supported on Android device.");
+#endif
+    }
+
+    public static int GetVolumePercent()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                return Mathf.Clamp(bridge.CallStatic<int>("getVolumePercent"), 0, 200);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetVolumePercent failed: {e.Message}");
+            return 100;
+        }
+#else
+        return 100;
+#endif
+    }
+
+    public static void SetVolumePercent(int percent)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setVolumePercent", percent);
+                Debug.Log($"[VlcPlaybackBridge] SetVolumePercent called with percent: {percent}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetVolumePercent failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetVolumePercent is only supported on Android device.");
 #endif
     }
 
@@ -775,6 +925,7 @@ public class VlcPlaybackBridge : MonoBehaviour
     public void OnVideoSizeChanged(string sizeStr)
     {
         Debug.Log($"[VlcPlaybackBridge] OnVideoSizeChanged: {sizeStr}");
+        SurfaceDebug($"layout_unity_message raw={sizeStr}");
         try
         {
             string[] parts = sizeStr.Split('|');
@@ -788,12 +939,20 @@ public class VlcPlaybackBridge : MonoBehaviour
                 int visibleHeight = parts.Length == 4
                     ? int.Parse(parts[3], CultureInfo.InvariantCulture)
                     : height;
+                SurfaceDebug(
+                    $"layout_unity_message parsed raw={width}x{height} visible={visibleWidth}x{visibleHeight} " +
+                    $"subscriberPresent={OnVideoSizeChangedEvent != null}");
                 OnVideoSizeChangedEvent?.Invoke(new VlcVideoSize(width, height, visibleWidth, visibleHeight));
+            }
+            else
+            {
+                SurfaceDebug($"layout_unity_message ignored invalid_parts count={parts.Length}");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] Error parsing video size: {e.Message}");
+            SurfaceDebug($"layout_unity_message parse_exception={e}");
         }
     }
 
@@ -879,6 +1038,7 @@ public class VlcPlaybackBridge : MonoBehaviour
         if (string.IsNullOrEmpty(jsonPayload)) return;
         
         Debug.Log($"[VlcPlaybackBridge] StartPlay: {jsonPayload}");
+        SurfaceDebug($"start_play received payloadLength={jsonPayload.Length}");
 
         try
         {
@@ -887,11 +1047,13 @@ public class VlcPlaybackBridge : MonoBehaviour
 
             XRVLC.Media.VlcMediaLibraryBridge.AddToHistory(mediaWrapper.Uri, mediaWrapper.Title);
             Snapshot.CurrentMedia = mediaWrapper;
+            SurfaceDebug($"start_play parsed uri={XRVLC.Utils.UriUtils.RedactUri(mediaWrapper.Uri)} title={mediaWrapper.Title}");
             OnPlayRequestedEvent?.Invoke(mediaWrapper);
         }
         catch (Exception e)
         {
             Debug.LogError($"解析 Android 传来的 JSON 数据失败: {e.Message}");
+            SurfaceDebug($"start_play parse_exception={e}");
         }
     }
 
@@ -906,19 +1068,26 @@ public class VlcPlaybackBridge : MonoBehaviour
     public void OnMediaParseFinished(string json)
     {
         Debug.Log($"[VlcPlaybackBridge] OnMediaParseFinished: {json}");
+        SurfaceDebug($"parse_unity_message rawLength={(json == null ? 0 : json.Length)}");
         try
         {
             var result = VlcPlaybackPayloadParser.ParseMediaParseResult(json);
-            if (result == null || result.width <= 0 || result.height <= 0)
+            if (result == null || string.IsNullOrEmpty(result.uri))
             {
                 Debug.LogWarning("[VlcPlaybackBridge] OnMediaParseFinished: invalid payload, ignored.");
+                SurfaceDebug($"parse_unity_message ignored resultNull={result == null} uriEmpty={result != null && string.IsNullOrEmpty(result.uri)}");
                 return;
             }
+            SurfaceDebug(
+                $"parse_unity_message parsed uri={XRVLC.Utils.UriUtils.RedactUri(result.uri)} " +
+                $"raw={result.width}x{result.height} visible={result.visibleWidth}x{result.visibleHeight} " +
+                $"projection={result.projection} subscriberPresent={OnMediaParseFinishedEvent != null}");
             OnMediaParseFinishedEvent?.Invoke(result);
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] OnMediaParseFinished parse error: {e.Message}");
+            SurfaceDebug($"parse_unity_message parse_exception={e}");
         }
     }
 

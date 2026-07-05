@@ -11,12 +11,6 @@ using XRVLC.XR;
 
 public class SettingsMenuController : MonoBehaviour
 {
-    private enum AudioChannelMode
-    {
-        Stereo,
-        Mono
-    }
-
     public enum SettingsTab
     {
         Playback,
@@ -33,10 +27,9 @@ public class SettingsMenuController : MonoBehaviour
     private static readonly Color SelectedButtonColor = new Color(1f, 1f, 1f, 0.24f);
     private static readonly Color HoverButtonColor = new Color(1f, 1f, 1f, 0.16f);
     private static readonly Color SelectedButtonHoverColor = new Color(1f, 1f, 1f, 0.32f);
+    private static readonly Color VlcOrange = new Color(1f, 0.53333336f, 0f, 1f);
     private static readonly Color SwitchOffTrackColor = new Color(1f, 1f, 1f, 0.16f);
-    private static readonly Color SwitchOnTrackColor = new Color(0.18f, 0.58f, 0.95f, 1f);
     private static readonly Color SwitchBorderColor = new Color(1f, 1f, 1f, 0.22f);
-    private static readonly Color SwitchKnobColor = new Color(1f, 1f, 1f, 0.96f);
     private static readonly Color TextColor = Color.white;
     private const string IconResourcePath = "UI/IconPark/";
     private const string GestureInfoIconName = "info";
@@ -57,7 +50,9 @@ public class SettingsMenuController : MonoBehaviour
     private const float SwitchWidth = 76f;
     private const float SwitchHeight = 38f;
     private const float SwitchKnobSize = 30f;
-    private const float SwitchKnobTravel = 19f;
+    private const float SwitchTrackLength = SwitchWidth * 0.75f;
+    private const float SwitchTrackThickness = SwitchKnobSize * 0.5f;
+    private const float SwitchKnobTravel = (SwitchWidth - SwitchKnobSize) * 0.5f;
     private static readonly VideoAspectRatio[] VideoAspectRatioOptions =
     {
         VideoAspectRatio.Source,
@@ -116,13 +111,14 @@ public class SettingsMenuController : MonoBehaviour
     private XrDropdown _buttonBDropdown;
     private Button _spatialSubtitleSwitchButton;
     private Button _outsideSubtitleSwitchButton;
+    private Button _audioBoostSwitchButton;
     private XrStepperControl _subtitleDelayStepper;
     private XrStepperControl _playbackRateStepper;
     private XrStepperControl _seekSecondsStepper;
     private XrDropdown _videoAspectRatioDropdown;
-    private readonly List<Button> _audioModeButtons = new List<Button>();
+    private Button _mixToMonoSwitchButton;
     private VideoAspectRatio _currentVideoAspectRatio;
-    private AudioChannelMode _currentAudioMode;
+    private bool _mixToMonoEnabled;
 
     public void Bind(XRVLC.Media.PlaybackService playbackService, ShortcutManager shortcutManager = null)
     {
@@ -177,7 +173,7 @@ public class SettingsMenuController : MonoBehaviour
             ConfigureRoot();
             Transform tabBar = CreateTabBar(transform);
             CreateTabButton(tabBar, SettingsTab.Playback, "播放");
-            CreateTabButton(tabBar, SettingsTab.Gesture, "手势");
+            CreateTabButton(tabBar, SettingsTab.Gesture, "快捷键");
             CreateTabButton(tabBar, SettingsTab.Subtitle, "字幕");
             CreateTabButton(tabBar, SettingsTab.Video, "视频");
             CreateTabButton(tabBar, SettingsTab.Audio, "音频");
@@ -350,10 +346,8 @@ public class SettingsMenuController : MonoBehaviour
 
     private void BuildAudioTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "声道输出");
-        Transform row = CreateRow(root.transform, "AudioChannelModeRow");
-        _audioModeButtons.Add(CreateButton(row, "立体声", menuFontSize, () => ApplyAudioMode(AudioChannelMode.Stereo), 154f, 46f));
-        _audioModeButtons.Add(CreateButton(row, "混合单声道", menuFontSize, () => ApplyAudioMode(AudioChannelMode.Mono), 206f, 46f));
+        _audioBoostSwitchButton = CreateSwitchRow(root.transform, "AudioBoostSwitchRow", "音量增益", ToggleAudioBoost);
+        _mixToMonoSwitchButton = CreateSwitchRow(root.transform, "MixToMonoSwitchRow", "混合为单声道", ToggleMixToMono);
     }
 
     private XrDropdown CreateVideoAspectRatioDropdown(Transform parent)
@@ -416,12 +410,30 @@ public class SettingsMenuController : MonoBehaviour
         element.flexibleWidth = 0f;
         element.flexibleHeight = 0f;
 
-        var track = item.GetComponent<RoundedRectImage>();
-        track.cornerRadius = SwitchHeight * 0.5f;
+        var hitArea = item.GetComponent<RoundedRectImage>();
+        hitArea.cornerRadius = SwitchHeight * 0.5f;
+        hitArea.borderWidth = 0f;
+        hitArea.borderColor = Color.clear;
+        hitArea.color = Color.clear;
+        hitArea.raycastTarget = true;
+
+        var trackObject = new GameObject("Track", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage));
+        trackObject.transform.SetParent(item.transform, false);
+
+        var trackRect = trackObject.GetComponent<RectTransform>();
+        trackRect.anchorMin = new Vector2(0.5f, 0.5f);
+        trackRect.anchorMax = new Vector2(0.5f, 0.5f);
+        trackRect.pivot = new Vector2(0.5f, 0.5f);
+        trackRect.sizeDelta = new Vector2(SwitchTrackLength, SwitchTrackThickness);
+        trackRect.anchoredPosition = Vector2.zero;
+        trackRect.SetAsFirstSibling();
+
+        var track = trackObject.GetComponent<RoundedRectImage>();
+        track.cornerRadius = SwitchTrackThickness * 0.5f;
         track.borderWidth = 1f;
         track.borderColor = SwitchBorderColor;
         track.color = SwitchOffTrackColor;
-        track.raycastTarget = true;
+        track.raycastTarget = false;
 
         var knobObject = new GameObject("Knob", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage));
         knobObject.transform.SetParent(item.transform, false);
@@ -435,12 +447,12 @@ public class SettingsMenuController : MonoBehaviour
 
         var knob = knobObject.GetComponent<RoundedRectImage>();
         knob.cornerRadius = SwitchKnobSize * 0.5f;
-        knob.color = SwitchKnobColor;
+        knob.color = VlcOrange;
         knob.raycastTarget = false;
 
         Button button = item.GetComponent<Button>();
         button.transition = Selectable.Transition.None;
-        button.targetGraphic = track;
+        button.targetGraphic = hitArea;
         if (onClick != null)
             button.onClick.AddListener(onClick);
         return button;
@@ -825,6 +837,11 @@ public class SettingsMenuController : MonoBehaviour
             UpdatePlaybackRateControl();
             UpdateSeekSecondsControl();
         }
+        if (tab == SettingsTab.Audio)
+        {
+            UpdateAudioBoostSwitch();
+            UpdateMixToMonoSwitch();
+        }
     }
 
     private void RefreshAllSelections()
@@ -836,7 +853,9 @@ public class SettingsMenuController : MonoBehaviour
         UpdatePlaybackRateControl();
         UpdateSeekSecondsControl();
         UpdateVideoLayoutSelection();
-        UpdateAudioModeSelection();
+        UpdateAudioBoostSwitch();
+        _mixToMonoEnabled = VlcPlaybackBridge.ShouldMixAudioToMono();
+        UpdateMixToMonoSwitch();
         LoadGestureValues();
     }
 
@@ -975,11 +994,28 @@ public class SettingsMenuController : MonoBehaviour
         ApplyVideoAspectRatio(GetVideoAspectRatioOption(index));
     }
 
-    private void ApplyAudioMode(AudioChannelMode mode)
+    private void ToggleMixToMono()
     {
-        _currentAudioMode = mode;
-        VlcPlaybackBridge.SetAudioChannelMode(ToAudioChannelModeValue(mode));
-        UpdateAudioModeSelection();
+        _mixToMonoEnabled = !_mixToMonoEnabled;
+        VlcPlaybackBridge.SetAudioChannelMode(_mixToMonoEnabled ? AudioChannelMonoValue : AudioChannelStereoValue);
+        UpdateMixToMonoSwitch();
+    }
+
+    private void ToggleAudioBoost()
+    {
+        bool enabled = !VlcPlaybackBridge.IsAudioBoostEnabled();
+        VlcPlaybackBridge.SetAudioBoostEnabled(enabled);
+        UpdateAudioBoostSwitch();
+    }
+
+    private void UpdateAudioBoostSwitch()
+    {
+        SetSwitchButtonState(_audioBoostSwitchButton, VlcPlaybackBridge.IsAudioBoostEnabled());
+    }
+
+    private void UpdateMixToMonoSwitch()
+    {
+        SetSwitchButtonState(_mixToMonoSwitchButton, _mixToMonoEnabled);
     }
 
     private void UpdateSubtitleControls()
@@ -1017,12 +1053,12 @@ public class SettingsMenuController : MonoBehaviour
     {
         if (button == null) return;
 
-        RoundedRectImage track = button.GetComponent<RoundedRectImage>();
+        Transform trackTransform = button.transform.Find("Track");
+        RoundedRectImage track = trackTransform != null ? trackTransform.GetComponent<RoundedRectImage>() : null;
         if (track != null)
         {
-            track.color = enabled ? SwitchOnTrackColor : SwitchOffTrackColor;
-            track.borderColor = enabled ? SwitchOnTrackColor : SwitchBorderColor;
-            button.targetGraphic = track;
+            track.color = enabled ? VlcOrange : SwitchOffTrackColor;
+            track.borderColor = enabled ? VlcOrange : SwitchBorderColor;
             track.SetVerticesDirty();
         }
 
@@ -1059,17 +1095,6 @@ public class SettingsMenuController : MonoBehaviour
         return index >= 0 && index < VideoAspectRatioOptions.Length
             ? VideoAspectRatioOptions[index]
             : VideoAspectRatio.Source;
-    }
-
-    private void UpdateAudioModeSelection()
-    {
-        SetButtonSelected(_audioModeButtons.Count > 0 ? _audioModeButtons[0] : null, _currentAudioMode == AudioChannelMode.Stereo);
-        SetButtonSelected(_audioModeButtons.Count > 1 ? _audioModeButtons[1] : null, _currentAudioMode == AudioChannelMode.Mono);
-    }
-
-    private static string ToAudioChannelModeValue(AudioChannelMode mode)
-    {
-        return mode == AudioChannelMode.Mono ? AudioChannelMonoValue : AudioChannelStereoValue;
     }
 
     private static bool TryParseFloat(string value, out float result)

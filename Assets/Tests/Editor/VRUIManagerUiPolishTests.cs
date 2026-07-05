@@ -13,6 +13,129 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void ControlPanelUsesFixedAuthoredPoseForLowLookPosition()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
+
+            StringAssert.DoesNotContain("placePanelFacingViewOnShow", source);
+            StringAssert.DoesNotContain("panelViewDistance", source);
+            StringAssert.DoesNotContain("panelViewDownOffset", source);
+            StringAssert.DoesNotContain("PlacePanelFacingViewForTest", source);
+            StringAssert.DoesNotContain("空间面板测试", source);
+            StringAssert.DoesNotContain("Vector3.ProjectOnPlane(cameraTransform.forward", source);
+
+            int canvasIndex = scene.IndexOf("m_Name: '[Building Block] Controller Canvas Interaction Canvas'", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(canvasIndex, 0);
+            int rectIndex = scene.IndexOf("RectTransform:", canvasIndex, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(rectIndex, 0);
+            string canvasBlock = scene.Substring(rectIndex, System.Math.Min(900, scene.Length - rectIndex));
+
+            StringAssert.Contains("m_LocalRotation: {x: 0.25881907, y: 0, z: 0, w: 0.9659259}", canvasBlock);
+            StringAssert.Contains("m_LocalPosition: {x: 0, y: 0, z: 1.5}", canvasBlock);
+            StringAssert.Contains("m_LocalScale: {x: 0.001, y: 0.001, z: 1}", canvasBlock);
+            StringAssert.Contains("m_LocalEulerAnglesHint: {x: 30, y: 0, z: 0}", canvasBlock);
+        }
+
+        [Test]
+        public void UiClarityKeepsRenderScaleStableAndSharpensText()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
+
+            StringAssert.Contains("private const float MinWorldCanvasDynamicPixelsPerUnit = 24f", source);
+            StringAssert.DoesNotContain("boostXrEyeTextureResolutionForUiClarity", source);
+            StringAssert.DoesNotContain("uiClarityEyeTextureResolutionScale", source);
+            StringAssert.DoesNotContain("ConfigureXrUiRenderScale", source);
+            StringAssert.DoesNotContain("XRSettings.eyeTextureResolutionScale", source);
+            StringAssert.Contains("ConfigureUiTextEdgeClarity();", source);
+            StringAssert.Contains("private const float UiTextSharpness = 0.35f", source);
+            StringAssert.Contains("SetTextMaterialFloat(material, \"_Sharpness\", UiTextSharpness)", source);
+            StringAssert.Contains("SetTextMaterialFloat(material, \"_FaceDilate\", 0f)", source);
+            StringAssert.Contains("SetTextMaterialFloat(material, \"_OutlineWidth\", 0f)", source);
+            StringAssert.Contains("material.DisableKeyword(\"OUTLINE_ON\")", source);
+            StringAssert.Contains("material.DisableKeyword(\"UNDERLAY_ON\")", source);
+            StringAssert.Contains("m_DynamicPixelsPerUnit: 24", scene);
+            StringAssert.DoesNotContain("m_DynamicPixelsPerUnit: 12", scene);
+        }
+
+        [Test]
+        public void IconParkSpritesUseSharpUncompressedAndroidImportsForVrClarity()
+        {
+            string iconFolder = ProjectFile("Assets/Resources/UI/IconPark");
+
+            foreach (string metaPath in Directory.GetFiles(iconFolder, "*.png.meta"))
+            {
+                string meta = File.ReadAllText(metaPath);
+                StringAssert.Contains("enableMipMap: 0", meta, metaPath);
+                StringAssert.Contains("filterMode: 1", meta, metaPath);
+
+                int androidIndex = meta.IndexOf("buildTarget: Android", System.StringComparison.Ordinal);
+                Assert.GreaterOrEqual(androidIndex, 0, metaPath);
+                string androidBlock = meta.Substring(androidIndex, System.Math.Min(700, meta.Length - androidIndex));
+                StringAssert.Contains("textureCompression: 0", androidBlock, metaPath);
+                StringAssert.Contains("overridden: 1", androidBlock, metaPath);
+            }
+        }
+
+        [Test]
+        public void BatteryStatusTextHasNoBlackOutlineInSceneAndRuntime()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
+
+            StringAssert.Contains("ConfigureBatteryTextNoOutline()", source);
+            StringAssert.Contains("ConfigureTextEdgeClarity(batteryText)", source);
+
+            int batteryTextIndex = scene.IndexOf("m_Name: BatteryText", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(batteryTextIndex, 0, "Scene should contain the authored BatteryText object.");
+
+            int nextObjectIndex = scene.IndexOf("--- !u!", batteryTextIndex + 1, System.StringComparison.Ordinal);
+            if (nextObjectIndex < 0)
+                nextObjectIndex = scene.Length;
+
+            string batteryTextBlock = scene.Substring(batteryTextIndex, nextObjectIndex - batteryTextIndex);
+            StringAssert.Contains("m_AnchoredPosition: {x: -4.71, y: 0.28}", batteryTextBlock);
+            StringAssert.Contains("m_SizeDelta: {x: 46.2, y: 23.8}", batteryTextBlock);
+            StringAssert.Contains("m_fontSize: 20", batteryTextBlock);
+            StringAssert.Contains("m_fontSizeBase: 20", batteryTextBlock);
+            StringAssert.Contains("m_fontSizeMin: 20", batteryTextBlock);
+            StringAssert.Contains("m_fontSizeMax: 20", batteryTextBlock);
+            StringAssert.DoesNotContain("_OutlineWidth: 0.28", batteryTextBlock);
+            StringAssert.DoesNotContain("m_fontColor: {r: 0, g: 0, b: 0, a: 1}", batteryTextBlock);
+            StringAssert.DoesNotContain("- OUTLINE_ON", scene);
+            StringAssert.DoesNotContain("_OutlineWidth: 0.28", scene);
+        }
+
+        [Test]
+        public void MainCameraKeepsPostProcessingOffForVideoSurface()
+        {
+            string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
+
+            int cameraDataIndex = scene.IndexOf(
+                "m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.UniversalAdditionalCameraData",
+                System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(cameraDataIndex, 0);
+
+            string cameraDataBlock = scene.Substring(cameraDataIndex, Mathf.Min(1200, scene.Length - cameraDataIndex));
+            StringAssert.Contains("m_RenderPostProcessing: 0", cameraDataBlock);
+            StringAssert.Contains("m_Antialiasing: 0", cameraDataBlock);
+            StringAssert.DoesNotContain("m_RenderPostProcessing: 1", cameraDataBlock);
+            StringAssert.DoesNotContain("m_Antialiasing: 2", cameraDataBlock);
+            StringAssert.DoesNotContain("m_Antialiasing: 3", cameraDataBlock);
+        }
+
+        [Test]
+        public void MobileUrpUsesModestSupersamplingForVrEdges()
+        {
+            string asset = File.ReadAllText(ProjectFile("Assets/Settings/Mobile_RPAsset.asset"));
+
+            StringAssert.Contains("m_MSAA: 4", asset);
+            StringAssert.Contains("m_RenderScale: 1.2", asset);
+            StringAssert.DoesNotContain("m_RenderScale: 1.35", asset);
+        }
+
+        [Test]
         public void TrackDropdownsUseCompactWidth()
         {
             string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
@@ -219,6 +342,22 @@ namespace XRVLC.Tests
             StringAssert.Contains("_curveRow.gameObject.SetActive(showFlatCurveOptions)", vr);
             StringAssert.Contains("geometryMenuFlatHeight", vr);
             StringAssert.Contains("TextAlignmentOptions.Left", vr);
+        }
+
+        [Test]
+        public void GeometryMenuProjectionButtonsPutFlatFirstAndNameMonoAsNo3D()
+        {
+            string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
+
+            int flatIndex = vr.IndexOf("_projectionFlatButton = CreateGeometryOptionButton(projectionRow, \"平面\"", System.StringComparison.Ordinal);
+            int sphere180Index = vr.IndexOf("_projection180Button = CreateGeometryOptionButton(projectionRow, \"180全景\"", System.StringComparison.Ordinal);
+            int sphere360Index = vr.IndexOf("_projection360Button = CreateGeometryOptionButton(projectionRow, \"360全景\"", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(flatIndex, 0);
+            Assert.Greater(sphere180Index, flatIndex);
+            Assert.Greater(sphere360Index, sphere180Index);
+
+            StringAssert.Contains("_stereoMonoButton = CreateGeometryOptionButton(stereoRow, \"无3D\"", vr);
+            StringAssert.DoesNotContain("平面左右眼划分", vr);
         }
 
         [Test]

@@ -12,9 +12,26 @@ namespace XRVLC
     public class PicoRenderSurface : MonoBehaviour, IRenderSurface
     {
         private const float ImmersiveSphereRadius = 50f;
+        private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
 
         private PXR_CompositionLayer _compLayer;
         private IntPtr _hardwareSurfaceHandle = IntPtr.Zero;
+
+        private static void SurfaceDebug(string message)
+        {
+            Debug.Log($"[{SurfaceDebugTag}] pico_surface {message}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (AndroidJavaClass log = new AndroidJavaClass("android.util.Log"))
+                    log.CallStatic<int>("e", SurfaceDebugTag, $"pico_surface {message}");
+            }
+            catch
+            {
+                // Logging only; keep render surface creation unaffected.
+            }
+#endif
+        }
 
         void Awake()
         {
@@ -26,7 +43,15 @@ namespace XRVLC
                                  VideoProjection proj = VideoProjection.Flat, StereoMode stereo = StereoMode.Mono,
                                  FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
         {
-            if (_compLayer == null) return;
+            if (_compLayer == null)
+            {
+                SurfaceDebug("rebuild_layer skipped compLayer=null");
+                return;
+            }
+            SurfaceDebug(
+                $"rebuild_layer start asHardwareSurface={asHardwareSurface} requested={videoWidth}x{videoHeight} " +
+                $"projection={proj} stereo={stereo} curve={curveMode} previousHandle={_hardwareSurfaceHandle} " +
+                $"previousExternal={_compLayer.externalAndroidSurfaceObject} enabled={_compLayer.enabled}");
             BindCompositionLayerPose();
 
             // 彻底销毁旧的 Android Surface
@@ -63,6 +88,9 @@ namespace XRVLC
             _compLayer.layerDepth = 0;
 
             Debug.Log($"[PicoRenderSurface] RebuildLayer — proj={proj}, isImmersive={isImmersive}, overlayType={_compLayer.overlayType}, shape={_compLayer.overlayShape}");
+            SurfaceDebug(
+                $"rebuild_layer configured shape={_compLayer.overlayShape} type={_compLayer.overlayType} " +
+                $"surface3D={_compLayer.externalAndroidSurface3DType}");
 
             ApplyProjectionRadius(proj, curveMode);
 
@@ -82,7 +110,9 @@ namespace XRVLC
             }
 
             // 层在此处创建，shape 和 layerLayout 在此固化
+            SurfaceDebug("rebuild_layer before_initialize_buffer");
             _compLayer.InitializeBuffer();
+            SurfaceDebug($"rebuild_layer after_initialize_buffer external={_compLayer.externalAndroidSurfaceObject}");
 
             // 重置 UV 截取矩阵
             _compLayer.useImageRect = false;
@@ -95,9 +125,13 @@ namespace XRVLC
             _compLayer.dstRectRight = new Rect(0, 0, 1, 1);
 
             _compLayer.externalAndroidSurfaceObjectCreated += OnSurfaceCreated;
+            SurfaceDebug("rebuild_layer subscribed_surface_created_callback");
 
             _compLayer.enabled = true;
             _compLayer.UpdateCoords();
+            SurfaceDebug(
+                $"rebuild_layer complete enabled={_compLayer.enabled} external={_compLayer.externalAndroidSurfaceObject} " +
+                $"ready={IsHardwareSurfaceReady()} handle={_hardwareSurfaceHandle}");
         }
 
         public void SetGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
@@ -194,6 +228,7 @@ namespace XRVLC
             {
                 _hardwareSurfaceHandle = _compLayer.externalAndroidSurfaceObject;
                 Debug.Log($"[PicoRenderSurface] 硬件 Surface 已生成: {_hardwareSurfaceHandle}");
+                SurfaceDebug($"surface_created handle={_hardwareSurfaceHandle} external={_compLayer.externalAndroidSurfaceObject}");
             }
         }
 
@@ -204,6 +239,7 @@ namespace XRVLC
             if (_hardwareSurfaceHandle == IntPtr.Zero && _compLayer.externalAndroidSurfaceObject != IntPtr.Zero)
             {
                 _hardwareSurfaceHandle = _compLayer.externalAndroidSurfaceObject;
+                SurfaceDebug($"surface_ready cached_from_external handle={_hardwareSurfaceHandle}");
             }
             return _hardwareSurfaceHandle != IntPtr.Zero;
         }
@@ -214,6 +250,9 @@ namespace XRVLC
         {
             if (_compLayer != null)
             {
+                SurfaceDebug(
+                    $"destroy_layer handle={_hardwareSurfaceHandle} external={_compLayer.externalAndroidSurfaceObject} " +
+                    $"enabled={_compLayer.enabled}");
                 _compLayer.DestroyLayer();
                 _compLayer.enabled = false;
                 _hardwareSurfaceHandle = IntPtr.Zero;

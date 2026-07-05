@@ -20,10 +20,13 @@ namespace XRVLC.Tests
             "next",
             "playlist",
             "settings",
+            "setting-two",
             "exit",
+            "home",
             "lock",
             "brightness",
             "volume",
+            "volume-notice",
             "battery",
             "battery-empty",
             "battery-low",
@@ -34,7 +37,8 @@ namespace XRVLC.Tests
             "subtitle",
             "info",
             "sphere",
-            "stereo3d"
+            "stereo3d",
+            "vr-glasses"
         };
 
         [Test]
@@ -65,6 +69,27 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void IconParkBatteryEmpty_IsEmptyShellWithoutInnerChargeBar()
+        {
+            string path = Path.Combine(Application.dataPath, "Resources/UI/IconPark/battery-empty.png");
+            byte[] bytes = File.ReadAllBytes(path);
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            try
+            {
+                Assert.IsTrue(ImageConversion.LoadImage(texture, bytes), "battery-empty.png should decode as a PNG.");
+                Assert.AreEqual(128, texture.width);
+                Assert.AreEqual(128, texture.height);
+                Assert.Less(texture.GetPixel(32, 64).a, 0.05f, "Battery empty icon should not contain an inner left charge bar.");
+                Assert.Greater(texture.GetPixel(8, 64).a, 0.75f, "Battery empty icon should still contain the outer shell stroke.");
+                Assert.Less(texture.GetPixel(15, 64).a, 0.2f, "Battery empty icon stroke should be thin enough to match the other IconPark controls.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
         public void VRUIManager_BindsIconParkSpritesForExistingControls()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
@@ -73,7 +98,15 @@ namespace XRVLC.Tests
             StringAssert.Contains("SetButtonIcon(previousBtn, \"previous\"", source);
             StringAssert.Contains("SetButtonIcon(nextBtn, \"next\"", source);
             StringAssert.Contains("SetButtonIcon(playlistToggleBtn, \"playlist\"", source);
-            StringAssert.Contains("SetButtonIcon(settingsBtn, \"settings\"", source);
+            StringAssert.Contains("SetButtonIcon(exitBtn, \"home\"", source);
+            StringAssert.Contains("SetButtonIcon(brightnessBtn, \"brightness\"", source);
+            StringAssert.Contains("SetButtonIcon(volumeBtn, \"volume-notice\"", source);
+            StringAssert.Contains("SetButtonIcon(threeDBtn, \"vr-glasses\"", source);
+            StringAssert.Contains("SetButtonIcon(settingsBtn, \"setting-two\"", source);
+            StringAssert.DoesNotContain("SetButtonIcon(exitBtn, \"exit\"", source);
+            StringAssert.DoesNotContain("SetButtonIcon(volumeBtn, \"volume\"", source);
+            StringAssert.DoesNotContain("SetButtonIcon(threeDBtn, \"stereo3d\"", source);
+            StringAssert.DoesNotContain("SetButtonIcon(settingsBtn, \"settings\"", source);
             StringAssert.Contains("HideLegacyButtonText(button.transform", source);
         }
 
@@ -101,7 +134,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("180全景", uiSource);
             StringAssert.Contains("360全景", uiSource);
             StringAssert.Contains("平面", uiSource);
-            StringAssert.Contains("平面左右眼划分", uiSource);
+            StringAssert.Contains("无3D", uiSource);
             StringAssert.Contains("上下3D", uiSource);
             StringAssert.Contains("左右3D", uiSource);
             StringAssert.Contains("无曲面", uiSource);
@@ -669,16 +702,60 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void SystemVerticalSliderPopup_SliderRootHasTransparentRaycastHitArea()
+        {
+            string prefab = File.ReadAllText(Path.Combine(Application.dataPath, "Prefabs/UI/SystemVerticalSliderPopup.prefab"));
+            int sliderIndex = prefab.IndexOf("m_Name: SystemSlider", StringComparison.Ordinal);
+            int backgroundIndex = prefab.IndexOf("m_Name: Background", sliderIndex, StringComparison.Ordinal);
+
+            Assert.GreaterOrEqual(sliderIndex, 0, "System slider popup prefab should contain a SystemSlider object.");
+            Assert.Greater(backgroundIndex, sliderIndex, "SystemSlider should contain a Background child after the root object.");
+
+            string sliderBlock = prefab.Substring(sliderIndex, backgroundIndex - sliderIndex);
+            StringAssert.Contains("UnityEngine.UI::UnityEngine.UI.Image", sliderBlock);
+            StringAssert.Contains("m_Color: {r: 1, g: 1, b: 1, a: 0}", sliderBlock);
+            StringAssert.Contains("m_RaycastTarget: 1", sliderBlock);
+        }
+
+        [Test]
+        public void VRUIManager_SystemSliderShowsPercentAndBoostedVolumeRange()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+
+            StringAssert.DoesNotContain("SystemSliderBoostedLength", source);
+            StringAssert.Contains("SystemVolumeBoostMarkerName = \"VolumeBoost100Marker\"", source);
+            StringAssert.Contains("SystemSliderStickPercentPerSecond", source);
+            StringAssert.Contains("private TextMeshProUGUI systemSliderPercentText", source);
+            StringAssert.Contains("private GameObject systemSliderBoostMarker", source);
+            StringAssert.Contains("ConfigureSystemSliderForMode(mode)", source);
+            StringAssert.Contains("UpdateSystemSliderPercentLabel", source);
+            StringAssert.Contains("UpdateVolumeBoostMarker", source);
+            StringAssert.Contains("HandleSystemSliderStickInput()", source);
+            StringAssert.Contains("TryGetSystemSliderStickAxis(out float axisY)", source);
+            StringAssert.Contains("IsSelfOrChildOf(target, systemSliderPopup)", source);
+            StringAssert.Contains("GetSystemSliderMaxPercent", source);
+            StringAssert.Contains("sliderLength = SystemSliderLength", source);
+            StringAssert.Contains("textRect.anchoredPosition = new Vector2(0f, SystemSliderPopupHeight * 0.5f + SystemSliderPercentTextGap + SystemSliderPercentTextHeight * 0.5f)", source);
+            StringAssert.Contains("ReadVolumePercentNormalized", source);
+            StringAssert.Contains("SetVolumePercentNormalized", source);
+            StringAssert.Contains("VlcPlaybackBridge.GetVolumePercent()", source);
+            StringAssert.Contains("VlcPlaybackBridge.SetVolumePercent(percent)", source);
+        }
+
+        [Test]
         public void VRUIManager_OnlyUpdatesInspectorAuthoredBatteryIconAndText()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
             StringAssert.Contains("ConfigureFixedSystemStatusText(systemTimeText, SystemTimeTextWidth)", source);
             StringAssert.Contains("public Image batteryIcon", source);
-            StringAssert.Contains("ResolveBatteryIconName(batteryPercent)", source);
-            StringAssert.Contains("SetBatteryIconSprite(batteryPercent)", source);
-            StringAssert.Contains("LoadIconWithFallback(iconName, BatteryUnknownIcon)", source);
+            StringAssert.Contains("private Image batteryFill", source);
+            StringAssert.Contains("SetBatteryVisuals(batteryPercent)", source);
+            StringAssert.Contains("EnsureBatteryFillImage()", source);
+            StringAssert.Contains("LoadIconWithFallback(BatteryShellIcon, BatteryShellIcon)", source);
             StringAssert.Contains("batteryIcon.sprite = sprite", source);
+            StringAssert.Contains("ConfigureBatteryTextNoOutline()", source);
+            StringAssert.Contains("ConfigureTextEdgeClarity(batteryText)", source);
             StringAssert.DoesNotContain("EnsureBatteryIcon()", source);
             StringAssert.DoesNotContain("ConfigureBatteryStatusText", source);
             StringAssert.DoesNotContain("ConfigureBatteryIconLayout", source);
@@ -689,21 +766,32 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_UsesBatteryIconsByChargeLevel()
+        public void VRUIManager_UsesBatteryEmptyShellWithTransparentFill()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
-            StringAssert.Contains("BatteryUnknownIcon = \"battery\"", source);
-            StringAssert.Contains("BatteryEmptyIcon = \"battery-empty\"", source);
-            StringAssert.Contains("BatteryLowIcon = \"battery-low\"", source);
-            StringAssert.Contains("BatteryMediumIcon = \"battery-medium\"", source);
-            StringAssert.Contains("BatteryFullIcon = \"battery-full\"", source);
-            StringAssert.Contains("if (batteryPercent <= 10)", source);
-            StringAssert.Contains("if (batteryPercent <= 35)", source);
-            StringAssert.Contains("if (batteryPercent <= 70)", source);
-            StringAssert.Contains("LoadIconWithFallback(iconName, BatteryUnknownIcon)", source);
-            StringAssert.DoesNotContain("BatteryLevelIconCropPaddingPx", source);
-            StringAssert.DoesNotContain("BatteryUnknownIconCropPaddingPx", source);
+            StringAssert.Contains("BatteryShellIcon = \"battery-empty\"", source);
+            StringAssert.Contains("BatteryFillObjectName = \"BatteryFill\"", source);
+            StringAssert.Contains("BatteryFillAlpha = 0.5f", source);
+            StringAssert.Contains("BatteryStatusFontSize = 20f", source);
+            StringAssert.Contains("BatteryBodyInnerMinX = 0.13f", source);
+            StringAssert.Contains("BatteryBodyInnerMaxX = 0.79f", source);
+            StringAssert.Contains("BatteryBodyInnerHeightRatio = 0.34f", source);
+            StringAssert.Contains("BatteryLowThresholdPercent = 20", source);
+            StringAssert.Contains("BatteryLowFillColor = new Color(1f, 0.53333336f, 0f, BatteryFillAlpha)", source);
+            StringAssert.Contains("BatteryNormalFillColor = new Color(1f, 1f, 1f, BatteryFillAlpha)", source);
+            StringAssert.Contains("batteryText.fontSize = BatteryStatusFontSize", source);
+            StringAssert.Contains("LayoutBatteryStatusText(contentRect)", source);
+            StringAssert.Contains("GetBatteryBodyContentRect()", source);
+            StringAssert.Contains("GetPreservedAspectSpriteRect(iconRect)", source);
+            StringAssert.Contains("batteryFill.color = batteryPercent < BatteryLowThresholdPercent ? BatteryLowFillColor : BatteryNormalFillColor", source);
+            StringAssert.Contains("batteryFill.gameObject.SetActive(batteryPercent >= 0)", source);
+            StringAssert.Contains("Mathf.Clamp01(batteryPercent / 100f)", source);
+            StringAssert.Contains("LayoutBatteryFill(fillRect, normalized)", source);
+            StringAssert.DoesNotContain("ResolveBatteryIconName", source);
+            StringAssert.DoesNotContain("BatteryLowIcon", source);
+            StringAssert.DoesNotContain("BatteryMediumIcon", source);
+            StringAssert.DoesNotContain("BatteryFullIcon", source);
         }
 
         [Test]
@@ -784,6 +872,19 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void VRUIManager_AwakeHidesPanelBeforeStart()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string awakeMethod = ExtractMethod(source, "Awake", "private void");
+
+            int awakeIndex = source.IndexOf("private void Awake()", StringComparison.Ordinal);
+            int startIndex = source.IndexOf("private void Start()", StringComparison.Ordinal);
+            Assert.GreaterOrEqual(awakeIndex, 0);
+            Assert.Greater(startIndex, awakeIndex);
+            StringAssert.Contains("SetPanelVisibility(false);", awakeMethod);
+        }
+
+        [Test]
         public void VRUIManager_PlayingStatusDoesNotAutoShowHiddenPanel()
         {
             Type managerType = Type.GetType("VRUIManager, Assembly-CSharp");
@@ -847,27 +948,52 @@ namespace XRVLC.Tests
             StringAssert.Contains("canvasGroup.blocksRaycasts = false", ensureMethod);
             StringAssert.Contains("loadingSpinnerImage.raycastTarget = false", ensureMethod);
             StringAssert.Contains("loadingSpinnerImage.sprite = LoadLoadingSprite()", ensureMethod);
-            StringAssert.Contains("UpdateLoadingOverlayPose();", updateMethod);
+            StringAssert.DoesNotContain("UpdateLoadingOverlayPose", source);
+            StringAssert.DoesNotContain("LoadingPanelUpOffsetMeters", source);
+            StringAssert.DoesNotContain("LoadingDistanceFromCameraMeters", source);
+            StringAssert.DoesNotContain("GetControlPanelWorldCenter", source);
+            StringAssert.DoesNotContain("loadingOverlay.transform.position", source);
+            StringAssert.DoesNotContain("loadingOverlay.transform.LookAt", source);
             StringAssert.Contains("loadingSpinnerTransform.Rotate(0f, 0f, LoadingSpinnerDegreesPerSecond * Time.unscaledDeltaTime)", updateMethod);
             StringAssert.Contains("Resources.Load<Sprite>(IconResourcePath + LoadingIconResourceName)", spriteMethod);
             StringAssert.Contains("CreateGeneratedLoadingSpinnerSprite()", spriteMethod);
         }
 
         [Test]
-        public void VRUIManager_PositionsLoadingOverlayAbovePlaybackPanelFiveMetersFromCamera()
+        public void VRUIManager_KeepsLoadingOverlayEditorAuthoredTransform()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
             string ensureMethod = ExtractMethod(source, "EnsureLoadingOverlay", "private void");
             string updateMethod = ExtractMethod(source, "UpdateLoadingAnimation", "private void");
-            string poseMethod = ExtractMethod(source, "UpdateLoadingOverlayPose", "private void");
 
-            StringAssert.Contains("private const float LoadingDistanceFromCameraMeters = 5f", source);
             StringAssert.Contains("canvas.renderMode = RenderMode.WorldSpace", ensureMethod);
-            StringAssert.Contains("UpdateLoadingOverlayPose();", updateMethod);
-            StringAssert.Contains("GetControlPanelWorldCenter", poseMethod);
-            StringAssert.Contains("cameraTransform.position + direction * LoadingDistanceFromCameraMeters", poseMethod);
-            StringAssert.Contains("loadingOverlay.transform.LookAt(cameraTransform.position)", poseMethod);
-            StringAssert.DoesNotContain("videoScreen", poseMethod);
+            StringAssert.Contains("canvas.worldCamera = GetLoadingCamera()", ensureMethod);
+            StringAssert.Contains("loadingOverlay.transform.SetAsLastSibling()", source);
+            StringAssert.DoesNotContain("UpdateLoadingOverlayPose();", updateMethod);
+            StringAssert.DoesNotContain("overlayRect.localScale = Vector3.one * LoadingWorldCanvasScale", ensureMethod);
+            StringAssert.DoesNotContain("overlayRect.anchoredPosition", ensureMethod);
+            StringAssert.DoesNotContain("overlayRect.localPosition", ensureMethod);
+        }
+
+        [Test]
+        public void VRUIManager_PlaybackPanelShowUsesCurrentMediaOrPlaylistGate()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string playbackService = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs"));
+            string showPanelMethod = ExtractMethod(source, "ShowPanelAndScheduleHide", "private void");
+            string toggleMethod = ExtractMethod(source, "TogglePanel", "public void");
+            string gateMethod = ExtractMethod(source, "CanShowPlaybackPanel", "private bool");
+
+            StringAssert.Contains("public bool HasCurrentMediaOrPlaylistItems()", playbackService);
+            StringAssert.Contains("if (CurrentMedia != null)", playbackService);
+            StringAssert.Contains("VlcPlaybackBridge.GetPlaylist()", playbackService);
+            StringAssert.Contains("VlcPlaybackPayloadParser.ParsePlaylist", playbackService);
+            StringAssert.Contains("playbackService.HasCurrentMediaOrPlaylistItems()", gateMethod);
+            StringAssert.DoesNotContain("playbackService.CurrentMedia != null", gateMethod);
+            StringAssert.Contains("if (!CanShowPlaybackPanel())", showPanelMethod);
+            StringAssert.Contains("SetPanelVisibility(false)", showPanelMethod);
+            StringAssert.Contains("if (!CanShowPlaybackPanel())", toggleMethod);
+            StringAssert.Contains("SetPanelVisibility(!isPanelVisible)", toggleMethod);
         }
 
         [Test]
@@ -1599,7 +1725,7 @@ namespace XRVLC.Tests
                 Assert.IsNotNull(geometryMenu, "Geometry menu should be created.");
 
                 Assert.Greater(GetButtonAlpha(geometryMenu, "平面"), 0f);
-                Assert.Greater(GetButtonAlpha(geometryMenu, "平面左右眼划分"), 0f);
+                Assert.Greater(GetButtonAlpha(geometryMenu, "无3D"), 0f);
                 Assert.Greater(GetButtonAlpha(geometryMenu, "无曲面"), 0f);
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "360全景"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "上下3D"));
@@ -1616,7 +1742,7 @@ namespace XRVLC.Tests
                 Assert.Greater(GetButtonAlpha(geometryMenu, "上下3D"), 0f);
                 Assert.Greater(GetButtonAlpha(geometryMenu, "大曲面"), 0f);
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "平面"));
-                Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "平面左右眼划分"));
+                Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "无3D"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "无曲面"));
             }
             finally
@@ -1644,7 +1770,9 @@ namespace XRVLC.Tests
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/Settings/SettingsMenuController.cs"));
 
             StringAssert.Contains("播放", source);
-            StringAssert.Contains("手势", source);
+            StringAssert.Contains("快捷键", source);
+            StringAssert.Contains("CreateTabButton(tabBar, SettingsTab.Gesture, \"快捷键\")", source);
+            StringAssert.DoesNotContain("CreateTabButton(tabBar, SettingsTab.Gesture, \"手势\")", source);
             StringAssert.Contains("字幕", source);
             StringAssert.Contains("视频", source);
             StringAssert.Contains("音频", source);
@@ -1661,6 +1789,17 @@ namespace XRVLC.Tests
             StringAssert.Contains("ApplyVideoAspectRatio", source);
             StringAssert.DoesNotContain("ApplyVideoScaleMode", source);
             StringAssert.Contains("VlcPlaybackBridge.SetAudioChannelMode", source);
+            StringAssert.Contains("_audioBoostSwitchButton", source);
+            StringAssert.Contains("CreateSwitchRow(root.transform, \"AudioBoostSwitchRow\", \"音量增益\", ToggleAudioBoost)", source);
+            StringAssert.Contains("_mixToMonoSwitchButton", source);
+            StringAssert.Contains("CreateSwitchRow(root.transform, \"MixToMonoSwitchRow\", \"混合为单声道\", ToggleMixToMono)", source);
+            StringAssert.Contains("UpdateMixToMonoSwitch()", source);
+            StringAssert.Contains("_mixToMonoEnabled = VlcPlaybackBridge.ShouldMixAudioToMono()", source);
+            StringAssert.DoesNotContain("CreateSectionLabel(root.transform, \"声道输出\")", source);
+            StringAssert.DoesNotContain("CreateButton(row, \"立体声\"", source);
+            StringAssert.DoesNotContain("CreateButton(row, \"混合单声道\"", source);
+            StringAssert.Contains("VlcPlaybackBridge.IsAudioBoostEnabled()", source);
+            StringAssert.Contains("VlcPlaybackBridge.SetAudioBoostEnabled(enabled)", source);
             StringAssert.DoesNotContain("PlaybackUiSettingsService.SaveSubtitleRenderMode", source);
             StringAssert.DoesNotContain("PlaybackUiSettingsService.SaveAudioChannelMode", source);
             StringAssert.DoesNotContain("180全景", source);
@@ -1682,6 +1821,25 @@ namespace XRVLC.Tests
             StringAssert.Contains("CreatePlaybackRateStepper(root.transform)", playbackBlock);
             StringAssert.DoesNotContain("PlaybackRateStepperRow", subtitleBlock);
             StringAssert.DoesNotContain("CreatePlaybackRateStepper", subtitleBlock);
+        }
+
+        [Test]
+        public void SettingsMenuController_UsesVlcOrangeThinCapsuleSwitch()
+        {
+            string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/Settings/SettingsMenuController.cs"));
+
+            StringAssert.Contains("VlcOrange = new Color(1f, 0.53333336f, 0f, 1f)", source);
+            StringAssert.Contains("SwitchTrackLength = SwitchWidth * 0.75f", source);
+            StringAssert.Contains("SwitchTrackThickness = SwitchKnobSize * 0.5f", source);
+            StringAssert.Contains("SwitchKnobTravel = (SwitchWidth - SwitchKnobSize) * 0.5f", source);
+            StringAssert.Contains("new GameObject(\"Track\", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage))", source);
+            StringAssert.Contains("trackRect.sizeDelta = new Vector2(SwitchTrackLength, SwitchTrackThickness)", source);
+            StringAssert.Contains("trackRect.SetAsFirstSibling()", source);
+            StringAssert.Contains("knob.color = VlcOrange", source);
+            StringAssert.Contains("track.color = enabled ? VlcOrange : SwitchOffTrackColor", source);
+            StringAssert.Contains("button.targetGraphic = hitArea", source);
+            StringAssert.DoesNotContain("SwitchOnTrackColor = new Color(0.18f, 0.58f, 0.95f, 1f)", source);
+            StringAssert.DoesNotContain("SwitchKnobColor = new Color(1f, 1f, 1f, 0.96f)", source);
         }
 
         [Test]
@@ -1795,6 +1953,16 @@ namespace XRVLC.Tests
             StringAssert.Contains("bridge.CallStatic(\"setVideoScale\"", source);
             StringAssert.Contains("SetAudioChannelMode", source);
             StringAssert.Contains("bridge.CallStatic(\"setAudioChannelMode\"", source);
+            StringAssert.Contains("public static bool ShouldMixAudioToMono()", source);
+            StringAssert.Contains("bridge.CallStatic<bool>(\"shouldMixAudioToMono\")", source);
+            StringAssert.Contains("public static bool IsAudioBoostEnabled()", source);
+            StringAssert.Contains("bridge.CallStatic<bool>(\"isAudioBoostEnabled\")", source);
+            StringAssert.Contains("public static void SetAudioBoostEnabled(bool enabled)", source);
+            StringAssert.Contains("bridge.CallStatic(\"setAudioBoostEnabled\", enabled)", source);
+            StringAssert.Contains("public static int GetVolumePercent()", source);
+            StringAssert.Contains("bridge.CallStatic<int>(\"getVolumePercent\")", source);
+            StringAssert.Contains("public static void SetVolumePercent(int percent)", source);
+            StringAssert.Contains("bridge.CallStatic(\"setVolumePercent\", percent)", source);
         }
 
         [Test]
@@ -1810,8 +1978,35 @@ namespace XRVLC.Tests
             StringAssert.Contains("VIDEO_RATIO", source);
             StringAssert.Contains("MediaPlayer.ScaleType.entries", source);
             StringAssert.Contains("fun setAudioChannelMode", source);
+            StringAssert.Contains("fun shouldMixAudioToMono(): Boolean", source);
+            StringAssert.Contains("return audioChannelMode == XR_AUDIO_CHANNEL_MONO", source);
+            StringAssert.Contains("fun isAudioBoostEnabled(): Boolean", source);
+            StringAssert.Contains("fun setAudioBoostEnabled(enabled: Boolean)", source);
+            StringAssert.Contains("putSingle(KEY_AUDIO_BOOST, enabled)", source);
+            StringAssert.Contains("fun getVolumePercent(): Int", source);
+            StringAssert.Contains("fun setVolumePercent(percent: Int)", source);
+            StringAssert.Contains("private var lastUnityVolumePercent = 100", source);
+            StringAssert.Contains("lastUnityVolumePercent = safePercent", source);
+            StringAssert.Contains("if (isAudioBoostEnabled() && lastUnityVolumePercent > 100)", source);
+            StringAssert.Contains("coerceIn(0, if (isAudioBoostEnabled()) 200 else 100)", source);
             StringAssert.DoesNotContain("xr_audio_channel_mode", source);
             StringAssert.DoesNotContain("putSingle(XR_AUDIO_CHANNEL_MODE", source);
+        }
+
+        [Test]
+        public void AndroidPlaylistManager_AppliesMonoAudioFilterWhenXrSwitchEnabled()
+        {
+            string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+            string playlistManagerPath = Path.Combine(
+                projectRoot,
+                "vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt");
+            string source = File.ReadAllText(playlistManagerPath);
+
+            StringAssert.Contains("PlaybackServiceBridge.shouldMixAudioToMono()", source);
+            StringAssert.Contains("media.addOption(\":audio-filter=mono\")", source);
+            StringAssert.Contains("Enabled mono downmix audio filter", source);
+            StringAssert.DoesNotContain(":stereo-mode=6", source);
+            StringAssert.DoesNotContain("--stereo-mode=6", source);
         }
 
         private static string ExtractMethodBody(string source, string signature)

@@ -11,18 +11,25 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 [Serializable]
 public sealed class XrDropdownItemData
 {
-    public XrDropdownItemData(string primaryText, string secondaryText = "", object payload = null, bool showBottomSeparator = false)
+    public XrDropdownItemData(
+        string primaryText,
+        string secondaryText = "",
+        object payload = null,
+        bool showBottomSeparator = false,
+        Action<int, XrDropdownItemData> onSelected = null)
     {
         this.primaryText = primaryText ?? string.Empty;
         this.secondaryText = secondaryText ?? string.Empty;
         this.payload = payload;
         this.showBottomSeparator = showBottomSeparator;
+        this.onSelected = onSelected;
     }
 
     public string primaryText;
     public string secondaryText;
     public object payload;
     public bool showBottomSeparator;
+    [NonSerialized] public Action<int, XrDropdownItemData> onSelected;
 }
 
 [Serializable]
@@ -111,6 +118,10 @@ public sealed class XrDropdown : MonoBehaviour
 
     public void SetItems(IReadOnlyList<XrDropdownItemData> items, int selectedIndex = 0, bool notify = false)
     {
+        Debug.Log(
+            $"[XrDropdown] SetItems entry dropdown={name} incomingCount={(items != null ? items.Count : -1)} " +
+            $"selectedIndex={selectedIndex} notify={notify} valueBefore={_value} {DescribeValueChangedEventForLog()}");
+
         _items.Clear();
         if (items != null)
         {
@@ -124,9 +135,12 @@ public sealed class XrDropdown : MonoBehaviour
             selectedIndex = Mathf.Clamp(selectedIndex, 0, _items.Count - 1);
 
         SetValueInternal(selectedIndex, notify);
-        RebuildRows();
+        SyncRowsToItems();
         ApplyLayout();
         RefreshShownValue();
+        Debug.Log(
+            $"[XrDropdown] SetItems exit dropdown={name} count={_items.Count} value={_value} " +
+            $"rows={_rows.Count} {DescribeValueChangedEventForLog()}");
     }
 
     public void SetItems(IReadOnlyList<string> items, int selectedIndex = 0, bool notify = false)
@@ -143,11 +157,13 @@ public sealed class XrDropdown : MonoBehaviour
     public void SetPlaceholder(string placeholder)
     {
         SetItems(new[] { new XrDropdownItemData(placeholder) }, 0, false);
-        SetInteractable(false);
     }
 
     public void SetInteractable(bool enabled)
     {
+        Debug.Log(
+            $"[XrDropdown] SetInteractable dropdown={name} enabled={enabled} " +
+            $"rows={_rows.Count} activeSelf={gameObject.activeSelf} activeInHierarchy={gameObject.activeInHierarchy}");
         interactable = enabled;
         if (captionButton != null)
             captionButton.interactable = enabled;
@@ -174,7 +190,12 @@ public sealed class XrDropdown : MonoBehaviour
     public void Show()
     {
         if (!interactable || popup == null)
+        {
+            Debug.LogWarning(
+                $"[XrDropdown] Show return dropdown={name} reason={(popup == null ? "popupNull" : "notInteractable")} " +
+                $"interactable={interactable} popupNull={popup == null} count={_items.Count} value={_value}");
             return;
+        }
 
         gameObject.SetActive(true);
         onBeforeShow.Invoke();
@@ -185,6 +206,9 @@ public sealed class XrDropdown : MonoBehaviour
         ResetCaptionGraphicState();
         if (scrollRect != null)
             scrollRect.verticalNormalizedPosition = 1f;
+        Debug.Log(
+            $"[XrDropdown] Show exit dropdown={name} popupActive={popup.activeSelf} " +
+            $"count={_items.Count} value={_value} {DescribeValueChangedEventForLog()}");
     }
 
     public void Hide()
@@ -216,9 +240,23 @@ public sealed class XrDropdown : MonoBehaviour
 
     internal void SelectIndex(int index)
     {
-        if (!interactable || index < 0 || index >= _items.Count)
-            return;
+        Debug.Log(
+            $"[XrDropdown] SelectIndex entry dropdown={name} index={index} count={_items.Count} " +
+            $"interactable={interactable} activeSelf={gameObject.activeSelf} " +
+            $"activeInHierarchy={gameObject.activeInHierarchy} popupActive={IsOpen}");
 
+        if (!interactable || index < 0 || index >= _items.Count)
+        {
+            Debug.LogWarning(
+                $"[XrDropdown] SelectIndex ignored dropdown={name} index={index} count={_items.Count} " +
+                $"interactable={interactable} activeSelf={gameObject.activeSelf} " +
+                $"activeInHierarchy={gameObject.activeInHierarchy}");
+            return;
+        }
+
+        Debug.Log(
+            $"[XrDropdown] SelectIndex invoke dropdown={name} index={index} valueBefore={_value} " +
+            $"closeOnSelect={closeOnSelect}");
         SetValueInternal(index, true);
         RefreshRows();
         RefreshShownValue();
@@ -229,12 +267,47 @@ public sealed class XrDropdown : MonoBehaviour
     private void SetValueInternal(int value, bool notify)
     {
         int clamped = _items.Count == 0 ? 0 : Mathf.Clamp(value, 0, _items.Count - 1);
+        Debug.Log(
+            $"[XrDropdown] SetValueInternal entry dropdown={name} requested={value} clamped={clamped} " +
+            $"valueBefore={_value} notify={notify} count={_items.Count} {DescribeValueChangedEventForLog()}");
         if (_value == clamped && !notify)
+        {
+            Debug.Log(
+                $"[XrDropdown] SetValueInternal return dropdown={name} reason=sameValueNotifyFalse " +
+                $"value={_value} clamped={clamped} notify={notify}");
             return;
+        }
 
         _value = clamped;
         if (notify)
+        {
+            if (onValueChanged == null)
+            {
+                Debug.LogError(
+                    $"[XrDropdown] SetValueInternal return dropdown={name} reason=onValueChangedNull " +
+                    $"value={_value} notify={notify}");
+                return;
+            }
+            Debug.Log(
+                $"[XrDropdown] SetValueInternal invokeStart dropdown={name} value={_value} " +
+                $"{DescribeValueChangedEventForLog()}");
             onValueChanged.Invoke(_value);
+            Debug.Log(
+                $"[XrDropdown] SetValueInternal invokeEnd dropdown={name} value={_value} " +
+                $"{DescribeValueChangedEventForLog()}");
+        }
+        else
+        {
+            Debug.Log(
+                $"[XrDropdown] SetValueInternal skipInvoke dropdown={name} reason=notifyFalse value={_value}");
+        }
+    }
+
+    public string DescribeValueChangedEventForLog()
+    {
+        return onValueChanged == null
+            ? "eventNull=True persistentListeners=-1"
+            : $"eventNull=False persistentListeners={onValueChanged.GetPersistentEventCount()}";
     }
 
     private void RefreshShownValue()
@@ -246,24 +319,49 @@ public sealed class XrDropdown : MonoBehaviour
         StyleText(captionText, false);
     }
 
-    private void RebuildRows()
+    private void SyncRowsToItems()
     {
         if (content == null || rowPrefab == null)
+        {
+            Debug.LogWarning(
+                $"[XrDropdown] SyncRowsToItems return dropdown={name} " +
+                $"reason={(content == null ? "contentNull" : "rowPrefabNull")} count={_items.Count}");
             return;
-
-        for (int i = 0; i < _rows.Count; i++)
-            if (_rows[i] != null && _rows[i] != rowPrefab)
-                Destroy(_rows[i].gameObject);
-        _rows.Clear();
+        }
 
         rowPrefab.gameObject.SetActive(false);
-        for (int i = 0; i < _items.Count; i++)
+
+        for (int i = _rows.Count - 1; i >= _items.Count; i--)
+        {
+            XrDropdownItem row = _rows[i];
+            if (row != null && row != rowPrefab)
+            {
+                Debug.Log($"[XrDropdown] SyncRowsToItems remove dropdown={name} item={row.name} index={i}");
+                Destroy(row.gameObject);
+            }
+            _rows.RemoveAt(i);
+        }
+
+        for (int i = _rows.Count; i < _items.Count; i++)
         {
             XrDropdownItem row = Instantiate(rowPrefab, content);
+            _rows.Add(row);
+            Debug.Log($"[XrDropdown] SyncRowsToItems add dropdown={name} itemIndex={i}");
+        }
+
+        for (int i = 0; i < _items.Count; i++)
+        {
+            XrDropdownItem row = _rows[i];
+            if (row == null || row == rowPrefab)
+            {
+                row = Instantiate(rowPrefab, content);
+                _rows[i] = row;
+                Debug.Log($"[XrDropdown] SyncRowsToItems replace dropdown={name} itemIndex={i}");
+            }
+
             row.gameObject.name = $"Item {i}";
             row.gameObject.SetActive(true);
             row.Bind(this, i, _items[i]);
-            _rows.Add(row);
         }
 
         RefreshRows();

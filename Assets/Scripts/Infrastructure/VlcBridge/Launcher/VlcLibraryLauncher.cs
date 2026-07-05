@@ -15,6 +15,7 @@ using Unity.XR.PXR;
 public class VlcLibraryLauncher : MonoBehaviour
 {
     private const int FlagActivityNewTask = 0x10000000;
+    private const string ExtraDeferVlcForegroundMs = "org.videolan.vlc.extra.XR_DEFER_FOREGROUND_MS";
     private const string PlaybackServiceBridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
 
     public static VlcLibraryLauncher Instance { get; private set; }
@@ -33,6 +34,7 @@ public class VlcLibraryLauncher : MonoBehaviour
     private bool? m_LastSessionFocused;
     private bool m_HasOpenedVlcLibraryOnStart;
     private bool m_OpenVlcAfterPermissionGranted;
+    private bool m_ExternalMediaLaunchHandled;
     private VlcFocusRestoreHandler m_FocusRestoreHandler;
 #if UNITY_ANDROID
     private PermissionCallbacks m_PermissionCallbacks;
@@ -60,13 +62,16 @@ public class VlcLibraryLauncher : MonoBehaviour
     {
         m_ModalityManager = FindAnyObjectByType<XRInputModalityManager>();
         EnsureFocusRestoreHandler();
+        Application.deepLinkActivated += OnDeepLinkActivated;
 
-        if (m_OpenVlcLibraryOnStart && Application.platform == RuntimePlatform.Android)
-            StartCoroutine(OpenVlcLibraryOnStart());
+        if (Application.platform == RuntimePlatform.Android)
+            StartCoroutine(HandleStartupLaunch());
     }
 
     private void OnDestroy()
     {
+        Application.deepLinkActivated -= OnDeepLinkActivated;
+
 #if UNITY_ANDROID
         PicoSessionEvents.SessionStateChanged -= OnSessionStateChanged;
         ClearPermissionCallbacks();
@@ -93,8 +98,16 @@ public class VlcLibraryLauncher : MonoBehaviour
     private void OnApplicationFocus(bool hasFocus)
     {
 #if UNITY_ANDROID
-        if (hasFocus)
-            TryOpenVlcAfterPermissionGranted();
+        if (!hasFocus)
+        {
+            EnsureFocusRestoreHandler().HideControllers();
+            return;
+        }
+
+        EnsureFocusRestoreHandler().TriggerRestore();
+        if (TryConsumeExternalMediaIntent()) return;
+        if (m_ExternalMediaLaunchHandled && !m_OpenVlcAfterPermissionGranted) return;
+        TryOpenVlcAfterPermissionGranted();
 #else
         // 非 Android 平台没有 PICO session 事件，继续使用 Unity 应用焦点兜底。
         if (objectsToHideWhenVlcOpens == null) return;
@@ -119,6 +132,59 @@ public class VlcLibraryLauncher : MonoBehaviour
         return m_FocusRestoreHandler;
     }
 
+    private IEnumerator HandleStartupLaunch()
+    {
+        yield return null;
+
+        if (TryConsumeExternalMediaIntent()) yield break;
+        if (m_ExternalMediaLaunchHandled) yield break;
+
+        if (m_OpenVlcLibraryOnStart && Application.platform == RuntimePlatform.Android)
+            StartCoroutine(OpenVlcLibraryOnStart());
+    }
+
+    private bool TryConsumeExternalMediaIntent()
+    {
+        return TryConsumeExternalMediaIntent(Application.absoluteURL);
+    }
+
+    private bool TryConsumeExternalMediaIntent(string fallbackUrl)
+    {
+        if (Application.platform != RuntimePlatform.Android) return false;
+
+        if (!ExternalMediaIntentBridge.TryConsumeCurrentIntent(out string payload) &&
+            !ExternalMediaIntentBridge.TryBuildPayloadFromUrl(fallbackUrl, out payload))
+        {
+            return false;
+        }
+
+        m_ExternalMediaLaunchHandled = true;
+        m_OpenVlcAfterPermissionGranted = false;
+        StartCoroutine(PlayExternalMediaAfterSceneReady(payload));
+        return true;
+    }
+
+    private IEnumerator PlayExternalMediaAfterSceneReady(string payload)
+    {
+        yield return null;
+
+        ColdStartSplashOverlay.Hide();
+        VlcPlaybackBridge playbackBridge = FindAnyObjectByType<VlcPlaybackBridge>();
+        if (playbackBridge == null)
+        {
+            Debug.LogError("[VlcLibraryLauncher] External media intent consumed, but VlcPlaybackBridge was not found.");
+            yield break;
+        }
+
+        Debug.Log("[VlcLibraryLauncher] External media intent consumed; starting Unity playback.");
+        playbackBridge.StartPlay(payload);
+    }
+
+    private void OnDeepLinkActivated(string url)
+    {
+        TryConsumeExternalMediaIntent(url);
+    }
+
     /// <summary>
     /// 启动后延迟一帧打开 VLC 媒体库，确保 Activity、XR 和焦点恢复组件完成初始化。
     /// </summary>
@@ -129,7 +195,7 @@ public class VlcLibraryLauncher : MonoBehaviour
         if (m_HasOpenedVlcLibraryOnStart) yield break;
         m_HasOpenedVlcLibraryOnStart = true;
 
-        OpenVLCMediaLibrary();
+        OpenVLCMediaLibrary(deferForegroundUntilColdStartSplashElapsed: true);
     }
 
     /// <summary>
@@ -148,6 +214,11 @@ public class VlcLibraryLauncher : MonoBehaviour
 
     public void OpenVLCMediaLibrary()
     {
+        OpenVLCMediaLibrary(deferForegroundUntilColdStartSplashElapsed: false);
+    }
+
+    private void OpenVLCMediaLibrary(bool deferForegroundUntilColdStartSplashElapsed)
+    {
         if (Application.platform != RuntimePlatform.Android)
         {
             Debug.LogWarning("VLC 媒体库仅在 Android 平台可用。");
@@ -156,7 +227,7 @@ public class VlcLibraryLauncher : MonoBehaviour
 
         if (HasRequiredPermissions())
         {
-            StartVLCActivity();
+            StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);
         }
         else
         {
@@ -282,14 +353,14 @@ public class VlcLibraryLauncher : MonoBehaviour
 #endif
     }
 
-    private void StartVLCActivity()
+    private void StartVLCActivity(bool deferForegroundUntilColdStartSplashElapsed = false)
     {
         try
         {
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
             using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
             {
-                RestoreVlcTaskOrStartFallback(currentActivity);
+                RestoreVlcTaskOrStartFallback(currentActivity, deferForegroundUntilColdStartSplashElapsed);
             }
             Debug.Log("已发送启动 VLC 媒体库 Intent");
         }
@@ -300,32 +371,37 @@ public class VlcLibraryLauncher : MonoBehaviour
         }
     }
 
-    private void RestoreVlcTaskOrStartFallback(AndroidJavaObject currentActivity)
+    private void RestoreVlcTaskOrStartFallback(AndroidJavaObject currentActivity, bool deferForegroundUntilColdStartSplashElapsed)
     {
-        try
+        if (!deferForegroundUntilColdStartSplashElapsed)
         {
-            using (AndroidJavaClass bridge = new AndroidJavaClass(PlaybackServiceBridgeClassName))
+            try
             {
-                if (bridge.CallStatic<bool>("restoreVlcTask", currentActivity))
+                using (AndroidJavaClass bridge = new AndroidJavaClass(PlaybackServiceBridgeClassName))
                 {
-                    Debug.Log("已恢复现有 VLC task。");
-                    return;
+                    if (bridge.CallStatic<bool>("restoreVlcTask", currentActivity))
+                    {
+                        Debug.Log("已恢复现有 VLC task。");
+                        return;
+                    }
                 }
             }
-        }
-        catch (Exception bridgeException)
-        {
-            Debug.LogWarning("恢复现有 VLC task 失败，改用启动入口: " + bridgeException.Message);
+            catch (Exception bridgeException)
+            {
+                Debug.LogWarning("恢复现有 VLC task 失败，改用启动入口: " + bridgeException.Message);
+            }
         }
 
-        StartVlcStartActivity(currentActivity);
+        StartVlcStartActivity(currentActivity, deferForegroundUntilColdStartSplashElapsed);
     }
 
-    private void StartVlcStartActivity(AndroidJavaObject currentActivity)
+    private void StartVlcStartActivity(AndroidJavaObject currentActivity, bool deferForegroundUntilColdStartSplashElapsed)
     {
         using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent", currentActivity, new AndroidJavaClass("org.videolan.vlc.StartActivity")))
         {
             intent.Call<AndroidJavaObject>("addFlags", FlagActivityNewTask);
+            if (deferForegroundUntilColdStartSplashElapsed)
+                intent.Call<AndroidJavaObject>("putExtra", ExtraDeferVlcForegroundMs, ColdStartSplashOverlay.MinimumVisibleMilliseconds);
             currentActivity.Call("startActivity", intent);
         }
     }

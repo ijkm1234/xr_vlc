@@ -23,6 +23,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("material.renderQueue = ReticleRenderQueue", source);
             StringAssert.Contains("material.SetFloat(ZWriteProperty, 0f)", source);
             StringAssert.Contains("m_UiSurfaceOffset: 0.006", scene);
+            StringAssert.Contains("m_PrefabScalingFactor: 0.75", scene);
         }
     }
 }

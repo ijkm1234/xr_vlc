@@ -65,6 +65,25 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void ParsePlaylist_ParsesItemsAndTreatsInvalidPayloadAsEmpty()
+        {
+            string json = "[{\"index\":0,\"title\":\"Movie%201\",\"length\":90000,\"uri\":\"file:///movie1.mp4\",\"isCurrent\":true},{\"index\":1,\"title\":\"Movie%202\",\"length\":0,\"uri\":\"file:///movie2.mp4\",\"isCurrent\":false}]";
+
+            var playlist = VlcPlaybackPayloadParser.ParsePlaylist(json);
+
+            Assert.AreEqual(2, playlist.Count);
+            Assert.AreEqual(0, playlist[0].index);
+            Assert.AreEqual("Movie%201", playlist[0].title);
+            Assert.AreEqual(90000, playlist[0].length);
+            Assert.AreEqual("file:///movie1.mp4", playlist[0].uri);
+            Assert.IsTrue(playlist[0].isCurrent);
+            Assert.AreEqual(0, VlcPlaybackPayloadParser.ParsePlaylist(null).Count);
+            Assert.AreEqual(0, VlcPlaybackPayloadParser.ParsePlaylist("").Count);
+            Assert.AreEqual(0, VlcPlaybackPayloadParser.ParsePlaylist("[]").Count);
+            Assert.AreEqual(0, VlcPlaybackPayloadParser.ParsePlaylist("{not-json").Count);
+        }
+
+        [Test]
         public void ParseMediaParseResult_UsesVisibleSizeAsContentSizeWithRawFallback()
         {
             string json = "{\"width\":3840,\"height\":2160,\"visibleWidth\":3840,\"visibleHeight\":1920,\"projection\":\"360\",\"duration\":1000}";
@@ -229,21 +248,39 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void PlaybackServiceBridge_SendsVisibleVideoSizeToUnity()
+        public void PlaybackServiceBridge_SendsRawLayoutSizeToUnityWithoutBridgeUri()
         {
             string androidBridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
             string unityBridgeSource = File.ReadAllText(ProjectFile("Assets/Scripts/Infrastructure/VlcBridge/Playback/VlcPlaybackBridge.cs"));
             string playbackEventsSource = File.ReadAllText(ProjectFile("Assets/Scripts/Infrastructure/VlcBridge/Playback/VlcPlaybackEvents.cs"));
 
+            StringAssert.Contains("\"uri\":${org.json.JSONObject.quote(uri.toString())}", androidBridgeSource);
+            StringAssert.DoesNotContain("sendVideoSizeChangedToUnity(", androidBridgeSource);
+            StringAssert.DoesNotContain("currentVideoSizeCallbackUri", androidBridgeSource);
+            StringAssert.DoesNotContain("payload.put(\"uri\"", androidBridgeSource);
+            StringAssert.Contains("sendToUnity(UnityBridgeContract.Method.ON_VIDEO_SIZE_CHANGED, \"$width|$height|$visibleWidth|$visibleHeight\")", androidBridgeSource);
+            StringAssert.DoesNotContain("if (width > 0 && height > 0)", androidBridgeSource);
             StringAssert.Contains("\"visibleWidth\":$visibleWidth", androidBridgeSource);
             StringAssert.Contains("\"visibleHeight\":$visibleHeight", androidBridgeSource);
             StringAssert.Contains("VideoLayoutSize(w, h, vw, vh)", androidBridgeSource);
-            StringAssert.Contains("sendToUnity(UnityBridgeContract.Method.ON_VIDEO_SIZE_CHANGED, \"$width|$height|$visibleWidth|$visibleHeight\")", androidBridgeSource);
-            StringAssert.DoesNotContain("sendToUnity(UnityBridgeContract.Method.ON_VIDEO_SIZE_CHANGED, \"1920|1080\")", androidBridgeSource);
+            StringAssert.DoesNotContain("sendToUnity(UnityBridgeContract.Method.ON_VIDEO_SIZE_CHANGED, \"1920|1080|1920|1080\")", androidBridgeSource);
             StringAssert.Contains("public static event Action<VlcVideoSize> OnVideoSizeChangedEvent", unityBridgeSource);
-            StringAssert.Contains("new VlcVideoSize(width, height, visibleWidth, visibleHeight)", unityBridgeSource);
+            StringAssert.Contains("string[] parts = sizeStr.Split('|')", unityBridgeSource);
+            StringAssert.Contains("OnVideoSizeChangedEvent?.Invoke(new VlcVideoSize(width, height, visibleWidth, visibleHeight))", unityBridgeSource);
             StringAssert.Contains("public static event Action<VlcVideoSize> OnVideoSizeChanged", playbackEventsSource);
-            StringAssert.DoesNotContain("public static event Action<int, int> OnVideoSizeChangedEvent", unityBridgeSource);
+            StringAssert.DoesNotContain("VlcVideoSizeChangedPayload", unityBridgeSource);
+            StringAssert.DoesNotContain("VlcVideoSizeChangedPayload", playbackEventsSource);
+        }
+
+        [Test]
+        public void PlaybackServiceBridge_DoesNotFallbackToHardcodedVideoSize()
+        {
+            string androidBridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
+
+            StringAssert.DoesNotContain("fallback to 1920x1080", androidBridgeSource);
+            StringAssert.DoesNotContain("width = 1920", androidBridgeSource);
+            StringAssert.DoesNotContain("height = 1080", androidBridgeSource);
+            StringAssert.DoesNotContain("1920|1080|1920|1080", androidBridgeSource);
         }
 
         [Test]
@@ -383,15 +420,18 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VlcOptions_ForcesOpenSlesAoutWithoutTimeStretchProbe()
+        public void VlcOptions_UsesNativeAoutSettingWithoutXrAoutProbe()
         {
             string optionsSource = File.ReadAllText(ProjectFile("vlc-android/application/resources/src/main/java/org/videolan/resources/VLCOptions.kt"));
 
-            StringAssert.Contains("XR_AOUT_PROBE = \"opensles\"", optionsSource);
             StringAssert.Contains("context.resources.getBoolean(R.bool.time_stretching_default)", optionsSource);
             StringAssert.Contains("pref.getBoolean(KEY_ENABLE_TIME_STRETCHING_AUDIO, timeStrechingDefault)", optionsSource);
             StringAssert.Contains("options.add(if (timeStreching) \"--audio-time-stretch\" else \"--no-audio-time-stretch\")", optionsSource);
-            StringAssert.Contains("options.add(\"--aout=$forcedXrAoutProbe\")", optionsSource);
+            StringAssert.Contains("pref.getString(KEY_AOUT, \"-1\")", optionsSource);
+            StringAssert.Contains("return if (aout == AOUT_OPENSLES) \"opensles\" else if (aout == AOUT_AUDIOTRACK) \"audiotrack\" else null", optionsSource);
+            StringAssert.DoesNotContain("XR_AOUT_PROBE", optionsSource);
+            StringAssert.DoesNotContain("forcedXrAoutProbe", optionsSource);
+            StringAssert.DoesNotContain("XR_AUDIO_PROBE forcing", optionsSource);
             StringAssert.DoesNotContain("XR_TIME_STRETCH_PROBE", optionsSource);
             StringAssert.DoesNotContain("forcing audio-time-stretch", optionsSource);
         }
@@ -645,10 +685,9 @@ namespace XRVLC.Tests
         {
             string manifest = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/AndroidManifest.xml"));
             int startActivityStart = manifest.IndexOf("<activity android:name=\".StartActivity\"", System.StringComparison.Ordinal);
-            int nextActivity = manifest.IndexOf("<activity android:name=\".gui.MainActivity\"", startActivityStart, System.StringComparison.Ordinal);
+            int nextActivity = manifest.IndexOf("<activity android:name=\".ExternalMediaActivity\"", startActivityStart, System.StringComparison.Ordinal);
             string startActivityManifest = manifest.Substring(startActivityStart, nextActivity - startActivityStart);
 
-            string drawable = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/res/drawable/ic_iconpark_loading_four.xml"));
             string styles = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/res/values/styles.xml"));
             string stylesV31 = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/res/values-v31/styles.xml"));
 
@@ -659,14 +698,74 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("android:logo=\"@drawable/pico_panel_icon\"", startActivityManifest);
             StringAssert.DoesNotContain("android:roundIcon=\"@mipmap/app_icon_round\"", startActivityManifest);
 
-            StringAssert.Contains("android:pathData=\"M4 24C4 35.0457 12.9543 44 24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4\"", drawable);
-            StringAssert.Contains("android:strokeColor=\"#FFFFFFFF\"", drawable);
-            StringAssert.Contains("android:strokeWidth=\"4\"", drawable);
-            StringAssert.Contains("android:strokeLineCap=\"round\"", drawable);
-
             StringAssert.Contains("<style name=\"Theme.VLC.Start.Transparent.NoUI\" parent=\"Theme.VLC.Transparent.NoUI\"", styles);
             StringAssert.Contains("<style name=\"Theme.VLC.Start.Transparent.NoUI\" parent=\"Theme.VLC.Transparent.NoUI\"", stylesV31);
             StringAssert.Contains("<item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/ic_iconpark_loading_four</item>", stylesV31);
+            StringAssert.DoesNotContain("ic_transparent_splash_icon", stylesV31);
+            Assert.IsFalse(File.Exists(ProjectFile("vlc-android/application/vlc-android/res/drawable/ic_transparent_splash_icon.xml")));
+            StringAssert.Contains("<style name=\"Theme.VLC.Main\" parent=\"Theme.VLC\"", stylesV31);
+            StringAssert.Contains("<item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/ic_iconpark_loading_four</item>", stylesV31);
+        }
+
+        [Test]
+        public void VlcManifest_ExternalMediaActivityOwnsExternalViewFilters()
+        {
+            string manifest = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/AndroidManifest.xml"));
+            int startActivityStart = manifest.IndexOf("<activity android:name=\".StartActivity\"", System.StringComparison.Ordinal);
+            int externalActivityStart = manifest.IndexOf("<activity android:name=\".ExternalMediaActivity\"", startActivityStart, System.StringComparison.Ordinal);
+            int mainActivityStart = manifest.IndexOf("<activity android:name=\".gui.MainActivity\"", externalActivityStart, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(startActivityStart, 0);
+            Assert.Greater(externalActivityStart, startActivityStart);
+            Assert.Greater(mainActivityStart, externalActivityStart);
+
+            string startActivityManifest = manifest.Substring(startActivityStart, externalActivityStart - startActivityStart);
+            string externalActivityManifest = manifest.Substring(externalActivityStart, mainActivityStart - externalActivityStart);
+
+            StringAssert.Contains("android:host=\"${applicationId}\"", startActivityManifest);
+            StringAssert.Contains("android:scheme=\"vlclauncher\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:mimeType=\"video/*\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:mimeType=\"audio/*\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:scheme=\"content\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:scheme=\"file\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:scheme=\"http\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:scheme=\"https\"", startActivityManifest);
+            StringAssert.DoesNotContain("android:pathPattern", startActivityManifest);
+            StringAssert.DoesNotContain("android.intent.action.SEND", startActivityManifest);
+            StringAssert.DoesNotContain("android.intent.action.SEARCH", startActivityManifest);
+            StringAssert.DoesNotContain("android.media.action.MEDIA_PLAY_FROM_SEARCH", startActivityManifest);
+
+            StringAssert.Contains("android:name=\".ExternalMediaActivity\"", externalActivityManifest);
+            StringAssert.Contains("android:exported=\"true\"", externalActivityManifest);
+            StringAssert.Contains("android:theme=\"@style/Theme.VLC.Start.Transparent.NoUI\"", externalActivityManifest);
+            StringAssert.Contains("android.intent.action.VIEW", externalActivityManifest);
+            StringAssert.Contains("android.intent.category.DEFAULT", externalActivityManifest);
+            StringAssert.Contains("android.intent.category.BROWSABLE", externalActivityManifest);
+            StringAssert.Contains("android:mimeType=\"video/*\"", externalActivityManifest);
+            StringAssert.Contains("android:mimeType=\"audio/*\"", externalActivityManifest);
+            StringAssert.Contains("android:scheme=\"content\"", externalActivityManifest);
+            StringAssert.Contains("android:scheme=\"file\"", externalActivityManifest);
+            StringAssert.Contains("android:scheme=\"http\"", externalActivityManifest);
+            StringAssert.Contains("android:scheme=\"https\"", externalActivityManifest);
+            StringAssert.Contains("android:scheme=\"smb\"", externalActivityManifest);
+            StringAssert.Contains("android:mimeType=\"*/mkv\"", externalActivityManifest);
+            StringAssert.DoesNotContain("android:icon=", externalActivityManifest);
+            StringAssert.DoesNotContain("android:logo=", externalActivityManifest);
+        }
+
+        [Test]
+        public void ExternalMediaActivity_ForwardsExternalMediaToUnityActivity()
+        {
+            string source = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/ExternalMediaActivity.kt"));
+
+            StringAssert.Contains("class ExternalMediaActivity", source);
+            StringAssert.Contains("EXTRA_EXTERNAL_MEDIA", source);
+            StringAssert.Contains("EXTRA_EXTERNAL_MEDIA_TOKEN", source);
+            StringAssert.Contains("ComponentName(packageName, \"com.unity3d.player.UnityPlayerActivity\")", source);
+            StringAssert.Contains("Intent.FLAG_GRANT_READ_URI_PERMISSION", source);
+            StringAssert.Contains("startActivity(unityIntent)", source);
+            StringAssert.Contains("finish()", source);
+            StringAssert.DoesNotContain("VideoPlayerActivity", source);
+            StringAssert.DoesNotContain("StartActivity::class.java", source);
         }
 
         [Test]
@@ -687,6 +786,8 @@ namespace XRVLC.Tests
             StringAssert.Contains("android:icon=\"@mipmap/app_icon\"", unityActivityManifest);
             StringAssert.Contains("android:roundIcon=\"@mipmap/app_icon_round\"", unityActivityManifest);
             StringAssert.Contains("android:logo=\"@drawable/pico_panel_icon\"", unityActivityManifest);
+            StringAssert.Contains("android:launchMode=\"singleTask\"", unityActivityManifest);
+            StringAssert.Contains("tools:replace=\"android:label,android:icon,android:roundIcon,android:logo,android:launchMode\"", unityActivityManifest);
         }
 
         [Test]
@@ -718,8 +819,10 @@ namespace XRVLC.Tests
 
             StringAssert.DoesNotContain("override fun onUserLeaveHint()", mainActivitySource);
             StringAssert.DoesNotContain("VLC/HomeProbe", mainActivitySource);
-            StringAssert.DoesNotContain("moveTaskToBack(true)", mainActivitySource);
             StringAssert.DoesNotContain("finishAndRemoveTask()", mainActivitySource);
+            StringAssert.Contains("private fun maybeDeferVlcForeground()", mainActivitySource);
+            StringAssert.Contains("val delayMs = intent.getIntExtra(EXTRA_DEFER_VLC_FOREGROUND_MS, 0)", mainActivitySource);
+            StringAssert.Contains("moveTaskToBack(true)", mainActivitySource);
             StringAssert.Contains("AppContextProvider.currentActivity = this", mainActivitySource);
             StringAssert.Contains("AppContextProvider.aliveActivities", mainActivitySource);
         }
@@ -820,12 +923,29 @@ namespace XRVLC.Tests
         public void ParseMediaParseResult_ParsesDimensionsProjectionAndDuration()
         {
             var result = VlcPlaybackPayloadParser.ParseMediaParseResult(
-                "{\"width\":3840,\"height\":1920,\"projection\":\"180\",\"duration\":7200000}");
+                "{\"uri\":\"file:///movie.mp4\",\"width\":3840,\"height\":1920,\"projection\":\"180\",\"duration\":7200000}");
 
+            Assert.AreEqual("file:///movie.mp4", result.uri);
             Assert.AreEqual(3840, result.width);
             Assert.AreEqual(1920, result.height);
             Assert.AreEqual("180", result.projection);
             Assert.AreEqual(7200000, result.duration);
+        }
+
+        [Test]
+        public void VlcSettingsNavigation_DoesNotExposeAndroidAutoItem()
+        {
+            string preferences = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/res/xml/preferences.xml"));
+            string fragment = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/gui/preferences/PreferencesFragment.kt"));
+            string parser = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/gui/preferences/search/PreferenceParser.kt"));
+
+            StringAssert.DoesNotContain("android_auto_category", preferences);
+            StringAssert.DoesNotContain("@string/android_auto", preferences);
+            StringAssert.DoesNotContain("R.xml.preferences_android_auto", fragment);
+            StringAssert.DoesNotContain("\"android_auto_category\"", fragment);
+            StringAssert.DoesNotContain("R.xml.preferences_android_auto", parser);
+            Assert.IsTrue(File.Exists(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/gui/preferences/PreferencesAndroidAuto.kt")));
+            Assert.IsTrue(File.Exists(ProjectFile("vlc-android/application/vlc-android/res/xml/preferences_android_auto.xml")));
         }
 
         private static string ProjectFile(string relativePath)

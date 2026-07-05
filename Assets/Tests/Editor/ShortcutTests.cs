@@ -192,6 +192,33 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void InputState_SuppressedTriggerAndAxisStillAllowsButtonEdgesWithoutCatchupSeek()
+        {
+            var state = new ShortcutInputState();
+
+            var buttonWhileSuppressed = state.UpdateHand(
+                XRNode.RightHand,
+                new Vector2(0.9f, 0f),
+                true,
+                false,
+                triggerPressed: true,
+                deltaTimeSeconds: 1f,
+                suppressTriggerAndAxisShortcuts: true);
+            var stillHeldAfterUnsuppressed = state.UpdateHand(
+                XRNode.RightHand,
+                new Vector2(0.9f, 0f),
+                false,
+                false);
+            var recentered = state.UpdateHand(XRNode.RightHand, Vector2.zero, false, false);
+            var pushedAgain = state.UpdateHand(XRNode.RightHand, new Vector2(0.9f, 0f), false, false);
+
+            Assert.AreEqual(ShortcutCommandType.TogglePlayPause, buttonWhileSuppressed.Type);
+            Assert.AreEqual(ShortcutCommandType.None, stillHeldAfterUnsuppressed.Type);
+            Assert.AreEqual(ShortcutCommandType.None, recentered.Type);
+            Assert.AreEqual(ShortcutCommandType.SeekForward, pushedAgain.Type);
+        }
+
+        [Test]
         public void InputState_ResetClearsHeldButtonAndAxisEdges()
         {
             var state = new ShortcutInputState();

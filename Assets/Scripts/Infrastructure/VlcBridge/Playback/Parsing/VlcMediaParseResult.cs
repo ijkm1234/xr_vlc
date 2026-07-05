@@ -3,6 +3,8 @@ using System;
 [Serializable]
 public class VlcMediaParseResult
 {
+    /// <summary>解析结果所属媒体 URI。</summary>
+    public string uri;
     /// <summary>解析出的原始视频宽度。</summary>
     public int width;
     /// <summary>解析出的原始视频高度。</summary>

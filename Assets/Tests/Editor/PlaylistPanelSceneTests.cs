@@ -33,6 +33,8 @@ namespace XRVLC.Tests
             StringAssert.Contains("playlistDropdown.SetItems(items, selectedIndex)", source);
             StringAssert.Contains("playlistDropdown.SetPlaceholder(\"暂无播放列表\")", source);
             StringAssert.Contains("VlcPlaybackBridge.SkipToIndex(index)", source);
+            StringAssert.Contains("VlcPlaybackPayloadParser.ParsePlaylist(json)", source);
+            StringAssert.DoesNotContain("private static List<PlaylistItemData> Parse", source);
             StringAssert.Contains("FormatDurationMs", source);
             StringAssert.Contains("DecodeDisplayTitle", source);
             StringAssert.DoesNotContain("PlaylistItemHoverTitle", source);

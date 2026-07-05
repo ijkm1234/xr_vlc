@@ -43,7 +43,37 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
         if (button != null)
         {
             button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(() => _owner?.SelectIndex(_index));
+            button.onClick.AddListener(() =>
+            {
+                Debug.Log(
+                    $"[XrDropdown] RowClick item={name} index={_index} owner={OwnerNameForLog()} " +
+                    $"text=\"{TextForLog()}\" activeSelf={gameObject.activeSelf} " +
+                    $"activeInHierarchy={gameObject.activeInHierarchy} " +
+                    $"buttonInteractable={button != null && button.interactable}");
+                if (_owner == null)
+                {
+                    Debug.LogWarning(
+                        $"[XrDropdown] RowClick return item={name} index={_index} reason=ownerNull " +
+                        $"text=\"{TextForLog()}\"");
+                    return;
+                }
+
+                _owner.SelectIndex(_index);
+                Debug.Log(
+                    $"[XrDropdown] RowClick dispatched item={name} index={_index} owner={OwnerNameForLog()}");
+                if (data?.onSelected == null)
+                {
+                    Debug.Log(
+                        $"[XrDropdown] RowClick itemHandlerSkip item={name} index={_index} reason=noItemHandler");
+                    return;
+                }
+
+                Debug.Log(
+                    $"[XrDropdown] RowClick itemHandlerStart item={name} index={_index} owner={OwnerNameForLog()}");
+                data.onSelected.Invoke(_index, data);
+                Debug.Log(
+                    $"[XrDropdown] RowClick itemHandlerEnd item={name} index={_index} owner={OwnerNameForLog()}");
+            });
         }
 
         SetBottomSeparatorVisible(data?.showBottomSeparator == true);
@@ -130,6 +160,10 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
 
     public void OnPointerEnter(PointerEventData eventData)
     {
+        Debug.Log(
+            $"[XrDropdown] RowHover enter item={name} index={_index} owner={OwnerNameForLog()} " +
+            $"text=\"{TextForLog()}\" activeSelf={gameObject.activeSelf} " +
+            $"activeInHierarchy={gameObject.activeInHierarchy}");
         _hovered = true;
         ApplyColors();
     }
@@ -212,5 +246,15 @@ public sealed class XrDropdownItem : MonoBehaviour, IPointerEnterHandler, IPoint
         }
         if (tooltip == null)
             tooltip = GetComponent<XrOverflowTooltip>();
+    }
+
+    private string OwnerNameForLog()
+    {
+        return _owner != null ? _owner.name : "<null>";
+    }
+
+    private string TextForLog()
+    {
+        return primaryText != null ? primaryText.text : string.Empty;
     }
 }

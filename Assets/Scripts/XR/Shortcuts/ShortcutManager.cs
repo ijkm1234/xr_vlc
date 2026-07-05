@@ -57,14 +57,10 @@ namespace XRVLC.XR
         {
             ProcessGripMove();
 
-            if (IsUiInputBlocked())
-            {
-                ResetShortcutInputState();
-                return;
-            }
+            bool blockUiTriggerAndStick = IsUiTriggerAndStickInputBlocked();
 
-            ProcessHand(XRNode.LeftHand);
-            ProcessHand(XRNode.RightHand);
+            ProcessHand(XRNode.LeftHand, blockUiTriggerAndStick);
+            ProcessHand(XRNode.RightHand, blockUiTriggerAndStick);
         }
 
         /// <summary>
@@ -75,7 +71,7 @@ namespace XRVLC.XR
             _shortcutPlaybackService?.ReloadConfig();
         }
 
-        public bool IsUiInputBlocked()
+        public bool IsUiTriggerAndStickInputBlocked()
         {
             if (uiInputGate == null)
                 uiInputGate = FindAnyObjectByType<XrUiInputGate>();
@@ -83,24 +79,19 @@ namespace XRVLC.XR
             return uiInputGate != null && uiInputGate.IsHoveringBlockingUi;
         }
 
-        private void ResetShortcutInputState()
-        {
-            _shortcutPlaybackService?.CancelShortcutPlaybackRateHold();
-            _inputState.Reset();
-        }
-
         /// <summary>
         /// 读取单只手柄的摇杆与按键输入，并派发边沿触发命令。
         /// </summary>
-        private void ProcessHand(XRNode hand)
+        private void ProcessHand(XRNode hand, bool blockUiTriggerAndStick)
         {
             InputDevice device = InputDevices.GetDeviceAtXRNode(hand);
             Vector2 axis = GetAxis(device);
             bool stickPressed = GetButton(device, CommonUsages.primary2DAxisClick);
+            bool triggerPressed = GetButton(device, CommonUsages.triggerButton);
 
-            if (!stickPressed && axis.y > ShortcutInputState.StickThreshold)
+            if (!blockUiTriggerAndStick && !stickPressed && axis.y > ShortcutInputState.StickThreshold)
                 _shortcutPlaybackService?.OffsetVideoScreenDistance(distanceStepMetersPerSecond * Time.deltaTime);
-            else if (!stickPressed && axis.y < -ShortcutInputState.StickThreshold)
+            else if (!blockUiTriggerAndStick && !stickPressed && axis.y < -ShortcutInputState.StickThreshold)
                 _shortcutPlaybackService?.OffsetVideoScreenDistance(-distanceStepMetersPerSecond * Time.deltaTime);
 
             ShortcutCommand command = _inputState.UpdateHand(
@@ -109,8 +100,9 @@ namespace XRVLC.XR
                 GetButton(device, CommonUsages.primaryButton),
                 GetButton(device, CommonUsages.secondaryButton),
                 stickPressed,
-                GetButton(device, CommonUsages.triggerButton),
-                Time.deltaTime);
+                triggerPressed,
+                Time.deltaTime,
+                suppressTriggerAndAxisShortcuts: blockUiTriggerAndStick);
 
             _shortcutPlaybackService?.Execute(command);
         }

@@ -104,7 +104,7 @@ public class PlaylistPanelController : MonoBehaviour
         EnsureDropdown();
 
         _playlist.Clear();
-        _playlist.AddRange(Parse(json));
+        _playlist.AddRange(VlcPlaybackPayloadParser.ParsePlaylist(json));
         int currentFromPlaylist = _playlist.FindIndex(item => item.isCurrent);
         if (currentFromPlaylist >= 0)
             _currentIndex = currentFromPlaylist;
@@ -151,22 +151,6 @@ public class PlaylistPanelController : MonoBehaviour
 
         if (panelRoot == null && playlistDropdown != null)
             panelRoot = playlistDropdown.gameObject;
-    }
-
-    private static List<PlaylistItemData> Parse(string json)
-    {
-        var result = new List<PlaylistItemData>();
-        if (string.IsNullOrEmpty(json) || json == "[]") return result;
-        try
-        {
-            var wrapper = JsonUtility.FromJson<PlaylistJsonWrapper>("{\"items\":" + json + "}");
-            if (wrapper?.items != null) result.AddRange(wrapper.items);
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[PlaylistPanel] JSON 解析失败: {e.Message}");
-        }
-        return result;
     }
 
     private static string DecodeDisplayTitle(string title)

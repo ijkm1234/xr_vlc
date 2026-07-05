@@ -7,10 +7,27 @@ namespace XRVLC
     [RequireComponent(typeof(PXR_CompositionLayer))]
     public sealed class FlatSubtitleOverlaySurface : MonoBehaviour
     {
+        private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
         private static Mesh s_SubtitleAlphaHoleMesh;
 
         private PXR_CompositionLayer _compLayer;
         private IntPtr _hardwareSurfaceHandle = IntPtr.Zero;
+
+        private static void SurfaceDebug(string message)
+        {
+            Debug.Log($"[{SurfaceDebugTag}] subtitle_surface {message}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (AndroidJavaClass log = new AndroidJavaClass("android.util.Log"))
+                    log.CallStatic<int>("e", SurfaceDebugTag, $"subtitle_surface {message}");
+            }
+            catch
+            {
+                // Diagnostics only.
+            }
+#endif
+        }
 
         private void Awake()
         {
@@ -40,6 +57,7 @@ namespace XRVLC
             if (_compLayer == null)
             {
                 Debug.LogError("[FlatSubtitleOverlaySurface] RebuildLayer failed: missing PXR_CompositionLayer");
+                SurfaceDebug("rebuild_layer failed compLayer=null");
                 return;
             }
 
@@ -47,6 +65,10 @@ namespace XRVLC
                 $"[FlatSubtitleOverlaySurface] RebuildLayer start: requestedSize={surfaceWidth}x{surfaceHeight}, " +
                 $"stereo={stereo}, previousSurface={_hardwareSurfaceHandle}, " +
                 $"previousExternalObject={_compLayer.externalAndroidSurfaceObject}");
+            SurfaceDebug(
+                $"rebuild_layer start requested={surfaceWidth}x{surfaceHeight} stereo={stereo} " +
+                $"previousHandle={_hardwareSurfaceHandle} previousExternal={_compLayer.externalAndroidSurfaceObject} " +
+                $"enabled={_compLayer.enabled}");
 
             _compLayer.externalAndroidSurfaceObjectCreated -= OnSurfaceCreated;
             _compLayer.DestroyLayer();
@@ -90,8 +112,11 @@ namespace XRVLC
 
             BindCompositionLayerPose();
             _compLayer.externalAndroidSurfaceObjectCreated += OnSurfaceCreated;
+            SurfaceDebug("rebuild_layer subscribed_surface_created_callback");
             _compLayer.enabled = true;
+            SurfaceDebug("rebuild_layer before_initialize_buffer");
             _compLayer.InitializeBuffer();
+            SurfaceDebug($"rebuild_layer after_initialize_buffer external={_compLayer.externalAndroidSurfaceObject}");
             _compLayer.UpdateCoords();
             RegisterAlphaHoleIfEnabled();
 
@@ -100,6 +125,9 @@ namespace XRVLC
                 $"parent={(transform.parent != null ? transform.parent.name : "none")}, localPosition={transform.localPosition}, " +
                 $"worldPosition={transform.position}, worldScale={transform.lossyScale}, overlayType={_compLayer.overlayType}, " +
                 $"externalObject={_compLayer.externalAndroidSurfaceObject}, ready={IsHardwareSurfaceReady()}");
+            SurfaceDebug(
+                $"rebuild_layer complete external={_compLayer.externalAndroidSurfaceObject} " +
+                $"ready={IsHardwareSurfaceReady()} handle={_hardwareSurfaceHandle}");
         }
 
         public bool IsHardwareSurfaceReady()
@@ -107,7 +135,10 @@ namespace XRVLC
             if (_compLayer == null) return false;
 
             if (_hardwareSurfaceHandle == IntPtr.Zero && _compLayer.externalAndroidSurfaceObject != IntPtr.Zero)
+            {
                 _hardwareSurfaceHandle = _compLayer.externalAndroidSurfaceObject;
+                SurfaceDebug($"surface_ready cached_from_external handle={_hardwareSurfaceHandle}");
+            }
 
             return _hardwareSurfaceHandle != IntPtr.Zero;
         }
@@ -121,6 +152,9 @@ namespace XRVLC
             Debug.Log(
                 $"[FlatSubtitleOverlaySurface] DestroyLayer: surface={_hardwareSurfaceHandle}, " +
                 $"externalObject={_compLayer.externalAndroidSurfaceObject}");
+            SurfaceDebug(
+                $"destroy_layer handle={_hardwareSurfaceHandle} external={_compLayer.externalAndroidSurfaceObject} " +
+                $"enabled={_compLayer.enabled}");
             _compLayer.externalAndroidSurfaceObjectCreated -= OnSurfaceCreated;
             _compLayer.DestroyLayer();
             _compLayer.enabled = false;
@@ -182,6 +216,7 @@ namespace XRVLC
 
             _hardwareSurfaceHandle = _compLayer.externalAndroidSurfaceObject;
             Debug.Log($"[FlatSubtitleOverlaySurface] Subtitle Surface created: {_hardwareSurfaceHandle}");
+            SurfaceDebug($"surface_created handle={_hardwareSurfaceHandle} external={_compLayer.externalAndroidSurfaceObject}");
         }
 
         private void OnDestroy()

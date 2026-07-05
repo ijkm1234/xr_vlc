@@ -214,6 +214,39 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void VideoScreenGeometryService_PrimesNewContentSizeBeforeLayoutRefit()
+        {
+            string geometryPath = Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreenGeometryService.cs");
+            string geometrySource = File.ReadAllText(geometryPath);
+            string rebuildMethod = ExtractMethod(geometrySource, "Rebuild", "public void");
+
+            int fitIndex = rebuildMethod.IndexOf("FitVideoSize(contentWidth, contentHeight)", System.StringComparison.Ordinal);
+            int layoutIndex = rebuildMethod.IndexOf("_videoScreen.SetVideoLayout", System.StringComparison.Ordinal);
+
+            Assert.That(fitIndex, Is.GreaterThanOrEqualTo(0), "Rebuild should fit using the current media content size.");
+            Assert.That(layoutIndex, Is.GreaterThanOrEqualTo(0), "Rebuild should still apply the persisted video layout settings.");
+            Assert.Less(
+                fitIndex,
+                layoutIndex,
+                "Current media size must be cached before SetVideoLayout refits, otherwise media switches can briefly reuse the previous video's aspect ratio.");
+        }
+
+        [Test]
+        public void PlaybackService_IgnoresMediaParseCallbacksForOtherMediaUri()
+        {
+            string playbackPath = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
+            string playbackSource = File.ReadAllText(playbackPath);
+            string method = ExtractMethod(playbackSource, "HandleMediaParseFinished", "private void");
+
+            StringAssert.Contains("if (!IsCurrentMediaUri(result.uri))", method);
+            StringAssert.Contains("Ignoring media parse callback for stale uri", method);
+            Assert.Less(
+                method.IndexOf("if (!IsCurrentMediaUri(result.uri))", System.StringComparison.Ordinal),
+                method.IndexOf("SetCurrentVideoSize(videoSize)", System.StringComparison.Ordinal),
+                "URI ownership must be checked before a parse callback can update current video size.");
+        }
+
+        [Test]
         public void PlaybackService_AppliesAspectRatioSettingWithFitScaleMode()
         {
             string playbackPath = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
@@ -235,6 +268,23 @@ namespace XRVLC.Tests
             StringAssert.Contains("videoScreen?.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio)", setAspectRatio);
             StringAssert.Contains("_videoScreen.SetVideoLayout", rebuildMethod);
             StringAssert.Contains("FitVideoSize(contentWidth, contentHeight)", rebuildMethod);
+        }
+
+        [Test]
+        public void PlaybackService_IgnoresInvalidVideoSizeCallbacksBeforeRebuild()
+        {
+            string playbackPath = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
+            string playbackSource = File.ReadAllText(playbackPath);
+            string method = ExtractMethod(playbackSource, "OnVideoSizeChanged", "private void");
+
+            StringAssert.Contains("private void OnVideoSizeChanged(VlcVideoSize videoSize)", playbackSource);
+            StringAssert.Contains("if (!videoSize.IsValid) return;", method);
+            StringAssert.DoesNotContain("IsCurrentMediaUri(payload.uri)", method);
+            StringAssert.DoesNotContain("Ignoring video size callback for stale uri", method);
+            Assert.Less(
+                method.IndexOf("if (!videoSize.IsValid) return;", System.StringComparison.Ordinal),
+                method.IndexOf("RebuildAndApplyGeometry(videoSize)", System.StringComparison.Ordinal),
+                "Invalid size callbacks, including 0x0 layout resets, must be ignored before any surface rebuild can run.");
         }
 
         [Test]
@@ -342,6 +392,10 @@ namespace XRVLC.Tests
             StringAssert.Contains("WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface)", rebuildMethod);
             StringAssert.Contains("BindVideoSurface(videoSpec)", rebuildMethod);
             StringAssert.Contains("BindSubtitleSurface(subtitleSpec)", rebuildMethod);
+            Assert.Less(
+                rebuildMethod.IndexOf("BindSubtitleSurface(subtitleSpec)", System.StringComparison.Ordinal),
+                rebuildMethod.IndexOf("BindVideoSurface(videoSpec)", System.StringComparison.Ordinal),
+                "Subtitle surface should be bound before the video surface so Android's first vout attach sees the complete surface set.");
 
             StringAssert.Contains("VlcPlaybackBridge.SetSurface(videoSurfacePtr);", bindVideoMethod);
             StringAssert.DoesNotContain("VlcPlaybackBridge.SetSubtitleSurface", bindVideoMethod);

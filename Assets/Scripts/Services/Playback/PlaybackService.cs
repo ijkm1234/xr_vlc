@@ -16,6 +16,7 @@ namespace XRVLC.Media
     {
         private const string DisabledSubtitleTrack = "-1";
         private const float ShortcutFastRate = 2f;
+        private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
 
         public static PlaybackService Instance { get; private set; }
 
@@ -68,6 +69,37 @@ namespace XRVLC.Media
         private bool _subtitleSurfaceBoundToVlc;
         private VlcVideoSize CurrentVideoSize =>
             new VlcVideoSize(_currentWidth, _currentHeight, _currentVisibleWidth, _currentVisibleHeight);
+
+        private static void SurfaceDebug(string message)
+        {
+            Debug.Log($"[{SurfaceDebugTag}] {message}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (AndroidJavaClass log = new AndroidJavaClass("android.util.Log"))
+                    log.CallStatic<int>("e", SurfaceDebugTag, message);
+            }
+            catch
+            {
+                // Keep diagnostics best-effort; never let logging affect playback.
+            }
+#endif
+        }
+
+        private string FormatSurfaceState()
+        {
+            if (videoScreen == null)
+                return "videoScreen=null";
+
+            return $"videoReady={videoScreen.IsHardwareSurfaceReady()}, videoSurface={videoScreen.GetHardwareSurfaceHandle()}, " +
+                   $"subtitleReady={videoScreen.IsFlatSubtitleSurfaceReady()}, subtitleSurface={videoScreen.GetFlatSubtitleSurfaceHandle()}, " +
+                   $"videoBound={_videoSurfaceBoundToVlc}, subtitleBound={_subtitleSurfaceBoundToVlc}";
+        }
+
+        private static string RedactForLog(string uri)
+        {
+            return string.IsNullOrEmpty(uri) ? "<empty>" : XRVLC.Utils.UriUtils.RedactUri(uri);
+        }
 
         private void Awake()
         {
@@ -169,7 +201,11 @@ namespace XRVLC.Media
             // 2. 告诉 AAR 预加载 URL
             // 获取暂存的 JSON 字符串，如果为空则直接使用 URI
             string payload = !string.IsNullOrEmpty(extraData) ? extraData : path;
+            bool payloadIsJson = payload != null && payload.TrimStart().StartsWith("{", StringComparison.Ordinal);
             Debug.Log($"[PlaybackService] 最终传给 AAR 的 payload: {payload}");
+            SurfaceDebug(
+                $"play_video preload path={RedactForLog(path)} current={RedactForLog(CurrentMedia?.Uri)} " +
+                $"start={startTimeMs} payloadIsJson={payloadIsJson}");
             VlcPlaybackBridge.PreloadLocation(payload);
         }
 
@@ -179,6 +215,31 @@ namespace XRVLC.Media
         /// </summary>
         private void HandleMediaParseFinished(VlcMediaParseResult result)
         {
+            if (result == null)
+            {
+                SurfaceDebug("parse_finished ignored: result=null");
+                return;
+            }
+
+            string normalizedCallbackUri = NormalizeMediaUri(result.uri);
+            string normalizedCurrentUri = NormalizeMediaUri(CurrentMedia?.Uri);
+            bool isCurrentUri = string.Equals(normalizedCurrentUri, normalizedCallbackUri, StringComparison.Ordinal);
+            SurfaceDebug(
+                $"parse_finished received uriMatch={isCurrentUri} callback={RedactForLog(result.uri)} " +
+                $"current={RedactForLog(CurrentMedia?.Uri)} raw={result.width}x{result.height} " +
+                $"visible={result.visibleWidth}x{result.visibleHeight} projection={result.projection} " +
+                $"duration={result.duration} state={FormatSurfaceState()}");
+
+            if (!isCurrentUri)
+            {
+                Debug.Log(
+                    $"[PlaybackService] Ignoring media parse callback for stale uri: callback={result.uri}, current={CurrentMedia?.Uri}");
+                SurfaceDebug(
+                    $"parse_finished ignored stale normalizedCallback={RedactForLog(normalizedCallbackUri)} " +
+                    $"normalizedCurrent={RedactForLog(normalizedCurrentUri)}");
+                return;
+            }
+
             VlcVideoSize videoSize = result.ToVideoSize();
             int width = videoSize.Width;
             int height = videoSize.Height;
@@ -186,6 +247,7 @@ namespace XRVLC.Media
             if (!videoSize.IsValid)
             {
                 Debug.LogWarning($"[PlaybackService] HandleMediaParseFinished: 无效尺寸 raw={width}x{height}, visible={videoSize.VisibleWidth}x{videoSize.VisibleHeight}");
+                SurfaceDebug($"parse_finished ignored invalid_size raw={width}x{height} visible={videoSize.VisibleWidth}x{videoSize.VisibleHeight}");
                 return;
             }
 
@@ -204,6 +266,7 @@ namespace XRVLC.Media
             }
 
             Debug.Log($"[PlaybackService] OnMediaParseFinished: raw={width}x{height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}, projection={result.projection}, duration={result.duration}ms");
+            SurfaceDebug($"parse_finished accepted content={videoSize.ContentWidth}x{videoSize.ContentHeight} before_rebuild state={FormatSurfaceState()}");
             RebuildAndApplyGeometry(videoSize);
         }
 
@@ -213,7 +276,16 @@ namespace XRVLC.Media
         /// </summary>
         private void OnVideoSizeChanged(VlcVideoSize videoSize)
         {
-            if (!videoSize.IsValid) return;
+            SurfaceDebug(
+                $"layout_callback received valid={videoSize.IsValid} raw={videoSize.Width}x{videoSize.Height} " +
+                $"visible={videoSize.VisibleWidth}x{videoSize.VisibleHeight} content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
+                $"state={FormatSurfaceState()}");
+
+            if (!videoSize.IsValid)
+            {
+                SurfaceDebug("layout_callback ignored invalid_size");
+                return;
+            }
 
             VlcVideoSize previousSize = CurrentVideoSize;
             VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
@@ -221,6 +293,10 @@ namespace XRVLC.Media
             bool contentUnchanged = previousSize.IsValid && HasSameContentDimensions(previousSize, videoSize);
             bool geometryUnchanged = HasSameGeometry(_currentGeometrySelection, nextGeometry);
             bool surfaceAlreadyCurrent = _geometryBindingCoroutine != null || IsVideoSurfaceCurrent(nextVideoSpec);
+            SurfaceDebug(
+                $"layout_callback decision contentUnchanged={contentUnchanged} geometryUnchanged={geometryUnchanged} " +
+                $"surfaceAlreadyCurrent={surfaceAlreadyCurrent} coroutineActive={_geometryBindingCoroutine != null} " +
+                $"nextProjection={nextGeometry.Projection} nextStereo={nextGeometry.Stereo} state={FormatSurfaceState()}");
 
             SetCurrentVideoSize(videoSize);
 
@@ -232,10 +308,12 @@ namespace XRVLC.Media
                         $"[PlaybackService] OnVideoSizeChanged ignored raw layout padding change: " +
                         $"raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
                 }
+                SurfaceDebug("layout_callback ignored already_current");
                 return;
             }
 
             Debug.Log($"[PlaybackService] OnVideoSizeChanged (矫正): raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
+            SurfaceDebug("layout_callback accepted before_rebuild");
             RebuildAndApplyGeometry(videoSize);
         }
 
@@ -247,8 +325,19 @@ namespace XRVLC.Media
             {
                 _currentGeometrySelection = ResolveRequestedGeometry();
                 if (_geometryBindingCoroutine != null)
+                {
+                    SurfaceDebug("rebuild_geometry stopping_previous_coroutine");
                     StopCoroutine(_geometryBindingCoroutine);
+                }
+                SurfaceDebug(
+                    $"rebuild_geometry start content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
+                    $"projection={_currentGeometrySelection.Projection} stereo={_currentGeometrySelection.Stereo} " +
+                    $"state={FormatSurfaceState()}");
                 _geometryBindingCoroutine = StartCoroutine(RebuildGeometryAndSubtitleSurface(videoSize));
+            }
+            else
+            {
+                SurfaceDebug($"rebuild_geometry skipped geometryService=null videoScreenNull={videoScreen == null}");
             }
         }
 
@@ -269,15 +358,21 @@ namespace XRVLC.Media
             _currentGeometrySelection = ResolveRequestedGeometry();
             VideoSurfaceSpec videoSpec = CreateVideoSurfaceSpec(videoSize, _currentGeometrySelection);
             bool shouldRebuildVideoSurface = ShouldRebuildVideoSurface(videoSpec);
+            SurfaceDebug(
+                $"surface_rebuild begin shouldRebuildVideo={shouldRebuildVideoSurface} " +
+                $"videoSpec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} " +
+                $"state={FormatSurfaceState()}");
             if (shouldRebuildVideoSurface)
             {
                 if (_videoSurfaceBoundToVlc)
                 {
+                    SurfaceDebug("surface_rebuild detaching_previous_video_surface");
                     VlcPlaybackBridge.DetachSurface();
                     _videoSurfaceBoundToVlc = false;
                 }
 
                 _geometryService.Rebuild(videoSize);
+                SurfaceDebug($"surface_rebuild after_geometry_rebuild state={FormatSurfaceState()}");
             }
             else
             {
@@ -288,8 +383,12 @@ namespace XRVLC.Media
 
             VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
             bool shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec, out _);
+            SurfaceDebug(
+                $"surface_rebuild before_wait shouldBindSubtitle={shouldBindSubtitleSurface} " +
+                $"state={FormatSurfaceState()}");
 
             yield return WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface);
+            SurfaceDebug($"surface_rebuild after_wait state={FormatSurfaceState()}");
 
             BindVideoSurface(videoSpec);
             if (shouldBindSubtitleSurface)
@@ -328,6 +427,10 @@ namespace XRVLC.Media
 
             if (shouldBindSubtitleSurface && !videoScreen.IsFlatSubtitleSurfaceReady())
                 Debug.LogError($"[PlaybackService] Subtitle surface is not ready after parallel wait. retries={retries}");
+
+            SurfaceDebug(
+                $"surface_wait finished retries={retries} videoRequired={shouldWaitForVideoSurface} " +
+                $"subtitleRequired={shouldBindSubtitleSurface} state={FormatSurfaceState()}");
         }
 
         private void BindVideoSurface(VideoSurfaceSpec videoSpec)
@@ -336,9 +439,13 @@ namespace XRVLC.Media
                 return;
 
             IntPtr videoSurfacePtr = videoScreen.GetHardwareSurfaceHandle();
+            SurfaceDebug(
+                $"bind_video enter surface={videoSurfacePtr} spec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/" +
+                $"{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} state={FormatSurfaceState()}");
             if (videoSurfacePtr == IntPtr.Zero)
             {
                 Debug.LogError("[PlaybackService] Skipping VLC surface bind because video surface is not ready.");
+                SurfaceDebug("bind_video skipped zero_surface");
                 return;
             }
 
@@ -346,6 +453,7 @@ namespace XRVLC.Media
             _boundVideoSurfaceSpec = videoSpec;
             _videoSurfaceBoundToVlc = true;
             Debug.Log($"[PlaybackService] Bound video surface: surface={videoSurfacePtr}, content={videoSpec.ContentWidth}x{videoSpec.ContentHeight}, projection={videoSpec.Projection}");
+            SurfaceDebug($"bind_video done surface={videoSurfacePtr} state={FormatSurfaceState()}");
         }
 
         private void BindSubtitleSurface(SubtitleSurfaceSpec subtitleSpec)
@@ -363,9 +471,13 @@ namespace XRVLC.Media
             }
 
             IntPtr subtitleSurfacePtr = videoScreen.GetFlatSubtitleSurfaceHandle();
+            SurfaceDebug(
+                $"bind_subtitle enter surface={subtitleSurfacePtr} spec={subtitleSpec.SurfaceWidth}x{subtitleSpec.SurfaceHeight} " +
+                $"mode={subtitleSpec.RenderMode} state={FormatSurfaceState()}");
             if (subtitleSurfacePtr == IntPtr.Zero)
             {
                 Debug.LogError("[PlaybackService] Subtitle surface was requested but is not ready.");
+                SurfaceDebug("bind_subtitle skipped zero_surface");
                 DisableAndDetachSubtitleSurface(false);
                 return;
             }
@@ -375,6 +487,7 @@ namespace XRVLC.Media
             _boundSubtitleSurfaceSpec = subtitleSpec;
             _subtitleSurfaceBoundToVlc = true;
             Debug.Log($"[PlaybackService] Bound subtitle surface: surface={subtitleSurfacePtr}, mode={subtitleSpec.RenderMode}, content={subtitleSpec.ContentWidth}x{subtitleSpec.ContentHeight}");
+            SurfaceDebug($"bind_subtitle done surface={subtitleSurfacePtr} state={FormatSurfaceState()}");
         }
 
         private void SetCurrentVideoSize(VlcVideoSize videoSize)
@@ -383,6 +496,27 @@ namespace XRVLC.Media
             _currentHeight = videoSize.Height;
             _currentVisibleWidth = videoSize.VisibleWidth;
             _currentVisibleHeight = videoSize.VisibleHeight;
+        }
+
+        private bool IsCurrentMediaUri(string callbackUri)
+        {
+            return CurrentMedia != null
+                && string.Equals(NormalizeMediaUri(CurrentMedia.Uri), NormalizeMediaUri(callbackUri), StringComparison.Ordinal);
+        }
+
+        private static string NormalizeMediaUri(string uri)
+        {
+            if (string.IsNullOrEmpty(uri))
+                return string.Empty;
+
+            try
+            {
+                return Uri.UnescapeDataString(uri).Trim();
+            }
+            catch (UriFormatException)
+            {
+                return uri.Trim();
+            }
         }
 
         private VideoGeometrySelection? GetManualGeometryOverride()
@@ -544,7 +678,7 @@ namespace XRVLC.Media
 
             // Apply projection early (scene layout: hide/show background board, sphere centering)
             // when the Android side has already told us the projection type.
-            // OnVideoSizeChanged will do a final authoritative pass once dimensions are known.
+            // OnMediaParseFinished will do the authoritative pass once dimensions are known.
             VideoGeometrySelection initialGeometry = ResolveRequestedGeometry();
             _currentGeometrySelection = initialGeometry;
             if (initialGeometry.Projection != VideoProjection.Flat || initialGeometry.Stereo != StereoMode.Mono)
@@ -774,6 +908,15 @@ namespace XRVLC.Media
         public TrackSnapshot GetSubtitleTrackSnapshotFromVlc()
         {
             return VlcPlaybackBridge.GetSubtitleTrackSnapshot();
+        }
+
+        public bool HasCurrentMediaOrPlaylistItems()
+        {
+            if (CurrentMedia != null)
+                return true;
+
+            string playlistJson = VlcPlaybackBridge.GetPlaylist();
+            return VlcPlaybackPayloadParser.ParsePlaylist(playlistJson).Count > 0;
         }
 
         public TrackSnapshot SetAudioTrack(string trackId)

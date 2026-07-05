@@ -28,7 +28,8 @@
             android:icon="@mipmap/app_icon"
             android:roundIcon="@mipmap/app_icon_round"
             android:logo="@drawable/pico_panel_icon"
+            android:launchMode="singleTask"
             tools:node="merge"
-            tools:replace="android:label,android:icon,android:roundIcon,android:logo" />
+            tools:replace="android:label,android:icon,android:roundIcon,android:logo,android:launchMode" />
     </application>
 </manifest>

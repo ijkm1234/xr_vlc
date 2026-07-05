@@ -7,7 +7,8 @@ public static class ColdStartSplashOverlay
     private const string SplashResourcePath = "AppIcon/icon_pico_splash";
     private const int OverlayLayer = 5;
     private const float CanvasDistance = 2.5f;
-    private const float MinimumVisibleSeconds = 0.5f;
+    public const int MinimumVisibleMilliseconds = 500;
+    private const float MinimumVisibleSeconds = MinimumVisibleMilliseconds / 1000f;
     private static readonly Vector2 CanvasSize = new Vector2(2200f, 1400f);
     private static readonly Vector2 IconSize = new Vector2(260f, 260f);
 
@@ -89,8 +90,7 @@ public static class ColdStartSplashOverlay
         if (!s_VlcActivityReady || s_Root == null)
             return;
 
-        float visibleSeconds = Time.realtimeSinceStartup - s_ShownAtRealtime;
-        float remainingSeconds = MinimumVisibleSeconds - visibleSeconds;
+        float remainingSeconds = GetRemainingMinimumVisibleSeconds();
         if (remainingSeconds <= 0f)
         {
             Hide();
@@ -99,6 +99,15 @@ public static class ColdStartSplashOverlay
 
         if (s_HideCoroutine == null && s_Lifetime != null)
             s_HideCoroutine = s_Lifetime.StartCoroutine(HideAfterDelay(remainingSeconds));
+    }
+
+    private static float GetRemainingMinimumVisibleSeconds()
+    {
+        if (s_Root == null)
+            return 0f;
+
+        float visibleSeconds = Time.realtimeSinceStartup - s_ShownAtRealtime;
+        return MinimumVisibleSeconds - visibleSeconds;
     }
 
     private static IEnumerator HideAfterDelay(float delaySeconds)

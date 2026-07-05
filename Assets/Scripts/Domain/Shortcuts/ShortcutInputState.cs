@@ -42,23 +42,34 @@ namespace XRVLC
             bool secondaryButtonPressed,
             bool stickPressed = false,
             bool triggerPressed = false,
-            float deltaTimeSeconds = 0f)
+            float deltaTimeSeconds = 0f,
+            bool suppressTriggerAndAxisShortcuts = false)
         {
             Vector2 previousAxis = GetPreviousAxis(hand);
             SetPreviousAxis(hand, axis);
 
-            ShortcutCommand triggerCommand = UpdateTriggerHold(hand, triggerPressed, deltaTimeSeconds);
+            ShortcutCommand triggerCommand = UpdateTriggerHold(
+                hand,
+                suppressTriggerAndAxisShortcuts ? false : triggerPressed,
+                deltaTimeSeconds);
             if (triggerCommand.Type != ShortcutCommandType.None)
                 return triggerCommand;
 
-            if (!stickPressed && axis.x > StickThreshold && previousAxis.x <= StickThreshold)
+            if (!suppressTriggerAndAxisShortcuts && !stickPressed && axis.x > StickThreshold && previousAxis.x <= StickThreshold)
                 return new ShortcutCommand(ShortcutCommandType.SeekForward);
-            if (!stickPressed && axis.x < -StickThreshold && previousAxis.x >= -StickThreshold)
+            if (!suppressTriggerAndAxisShortcuts && !stickPressed && axis.x < -StickThreshold && previousAxis.x >= -StickThreshold)
                 return new ShortcutCommand(ShortcutCommandType.SeekBackward);
 
-            ShortcutCommand fullStickCommand = UpdateFullStickHold(hand, axis, stickPressed, deltaTimeSeconds);
-            if (fullStickCommand.Type != ShortcutCommandType.None)
-                return fullStickCommand;
+            if (suppressTriggerAndAxisShortcuts)
+            {
+                ResetFullStickHold(hand);
+            }
+            else
+            {
+                ShortcutCommand fullStickCommand = UpdateFullStickHold(hand, axis, stickPressed, deltaTimeSeconds);
+                if (fullStickCommand.Type != ShortcutCommandType.None)
+                    return fullStickCommand;
+            }
 
             if (CheckEdge(hand, ButtonKind.Primary, primaryButtonPressed))
                 return new ShortcutCommand(ShortcutCommandType.TogglePlayPause);

@@ -58,6 +58,30 @@ public static class VlcPlaybackPayloadParser
         return snapshot;
     }
 
+    public static List<PlaylistItemData> ParsePlaylist(string json)
+    {
+        var result = new List<PlaylistItemData>();
+        if (string.IsNullOrWhiteSpace(json))
+            return result;
+
+        string trimmed = json.Trim();
+        if (trimmed == "[]")
+            return result;
+
+        try
+        {
+            var wrapper = JsonUtility.FromJson<PlaylistJsonWrapper>("{\"items\":" + trimmed + "}");
+            if (wrapper?.items != null)
+                result.AddRange(wrapper.items);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[VlcPlaybackPayloadParser] Failed to parse playlist JSON payload: {ex.Message}");
+        }
+
+        return result;
+    }
+
     private static List<TrackInfo> ParseTracksJsonData(string data)
     {
         var list = new List<TrackInfo>();

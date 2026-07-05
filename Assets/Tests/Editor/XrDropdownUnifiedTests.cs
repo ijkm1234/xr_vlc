@@ -92,6 +92,16 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void DropdownPlaceholderRemainsInteractableForEmptyTrackActions()
+        {
+            string source = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
+
+            string placeholderBody = ExtractMethodBody(source, "public void SetPlaceholder(string placeholder)");
+            StringAssert.Contains("SetItems(new[] { new XrDropdownItemData(placeholder) }, 0, false)", placeholderBody);
+            StringAssert.DoesNotContain("SetInteractable(false)", placeholderBody);
+        }
+
+        [Test]
         public void AllDropdownConsumersUseSharedXrDropdown()
         {
             string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
@@ -129,6 +139,31 @@ namespace XRVLC.Tests
             StringAssert.Contains("subtitleTrackDropdown:", scene);
             StringAssert.Contains("playlistDropdown:", scene);
             StringAssert.DoesNotContain("Unity.TextMeshPro::TMPro.TMP_Dropdown", scene);
+        }
+
+        private static string ExtractMethodBody(string source, string signature)
+        {
+            int signatureIndex = source.IndexOf(signature, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(signatureIndex, 0, $"Missing method signature: {signature}");
+
+            int bodyStart = source.IndexOf('{', signatureIndex);
+            Assert.GreaterOrEqual(bodyStart, 0, $"Missing method body start: {signature}");
+
+            int depth = 0;
+            for (int i = bodyStart; i < source.Length; i++)
+            {
+                if (source[i] == '{')
+                    depth++;
+                else if (source[i] == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                        return source.Substring(bodyStart, i - bodyStart + 1);
+                }
+            }
+
+            Assert.Fail($"Missing method body end: {signature}");
+            return string.Empty;
         }
     }
 }
