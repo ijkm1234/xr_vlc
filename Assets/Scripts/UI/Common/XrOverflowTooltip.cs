@@ -1,6 +1,7 @@
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
@@ -8,6 +9,7 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
     private const float TooltipHeight = 52f;
     private const float TooltipPaddingHorizontal = 12f;
     private const float TooltipPaddingVertical = 7f;
+    private const int TooltipSortingOrder = 30000;
     private static readonly Color TooltipBackgroundColor = new Color(0.04f, 0.04f, 0.04f, 1f);
 
     public TextMeshProUGUI sourceLabel;
@@ -16,6 +18,7 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
     public TextMeshProUGUI tooltipText;
     public Transform overlayRoot;
     public bool alignTopLeftToSource;
+    public UnityEvent onBeforeShow = new UnityEvent();
 
     public void SetOverlayRoot(Transform root)
     {
@@ -37,22 +40,33 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
     public void OnPointerEnter(PointerEventData eventData)
     {
         EnsureTooltip();
-        if (!ShouldShowTooltip())
+        bool shouldShow = ShouldShowTooltip();
+        Debug.Log($"[XrOverflowTooltip] PointerEnter entry shouldShow={shouldShow} {DescribeTooltipStateForLog(eventData)}");
+        if (!shouldShow)
         {
             tooltipRoot.SetActive(false);
+            Debug.Log($"[XrOverflowTooltip] PointerEnter hide reason=ShouldShowTooltipFalse {DescribeTooltipStateForLog(eventData)}");
             return;
         }
 
+        if (onBeforeShow == null)
+            onBeforeShow = new UnityEvent();
+        Debug.Log($"[XrOverflowTooltip] PointerEnter beforeOnBeforeShow {DescribeTooltipStateForLog(eventData)}");
+        onBeforeShow.Invoke();
+        Debug.Log($"[XrOverflowTooltip] PointerEnter afterOnBeforeShow {DescribeTooltipStateForLog(eventData)}");
         tooltipText.text = fullText;
         tooltipRoot.SetActive(true);
+        EnsureTooltipCanvasPriority();
         tooltipRoot.transform.SetAsLastSibling();
         PositionTooltipNearSource();
+        Debug.Log($"[XrOverflowTooltip] PointerEnter shown {DescribeTooltipStateForLog(eventData)}");
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         if (tooltipRoot != null)
             tooltipRoot.SetActive(false);
+        Debug.Log($"[XrOverflowTooltip] PointerExit {DescribeTooltipStateForLog(eventData)}");
     }
 
     private void OnDisable()
@@ -81,6 +95,7 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
         tooltipRoot.transform.SetAsLastSibling();
         EnsureTooltipRootLayout();
         ApplyTooltipRootStyle();
+        EnsureTooltipCanvasPriority();
 
         Transform existingText = tooltipRoot.transform.Find("Text");
         if (tooltipText == null)
@@ -117,6 +132,23 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
         rootRect.pivot = new Vector2(0.5f, 0f);
         rootRect.anchoredPosition = new Vector2(0f, 4f);
         rootRect.sizeDelta = new Vector2(0f, TooltipHeight);
+    }
+
+    private void EnsureTooltipCanvasPriority()
+    {
+        if (tooltipRoot == null)
+            return;
+
+        Canvas referenceCanvas = GetComponentInParent<Canvas>();
+        Canvas canvas = tooltipRoot.GetComponent<Canvas>();
+        if (canvas == null)
+            canvas = tooltipRoot.AddComponent<Canvas>();
+
+        canvas.enabled = true;
+        canvas.overrideSorting = true;
+        canvas.sortingOrder = TooltipSortingOrder;
+        if (referenceCanvas != null)
+            canvas.sortingLayerID = referenceCanvas.sortingLayerID;
     }
 
     private void ApplyTooltipTextStyle()
@@ -221,5 +253,71 @@ public sealed class XrOverflowTooltip : MonoBehaviour, IPointerEnterHandler, IPo
 
         Vector2 preferred = tooltipText.GetPreferredValues(fullText, Mathf.Infinity, Mathf.Infinity);
         return Mathf.Max(TooltipHeight, preferred.y + TooltipPaddingVertical * 2f);
+    }
+
+    private string DescribeTooltipStateForLog(PointerEventData eventData)
+    {
+        Canvas sourceCanvas = GetComponentInParent<Canvas>();
+        Canvas tooltipCanvas = tooltipRoot != null ? tooltipRoot.GetComponent<Canvas>() : null;
+        RectTransform ownerRect = transform as RectTransform;
+        RectTransform tooltipRect = tooltipRoot != null ? tooltipRoot.GetComponent<RectTransform>() : null;
+        RectTransform sourceRect = sourceLabel != null ? sourceLabel.rectTransform : ownerRect;
+        GameObject pointerEnter = eventData != null ? eventData.pointerEnter : null;
+        GameObject pointerPress = eventData != null ? eventData.pointerPress : null;
+
+        return
+            $"ownerPath={GetTransformPath(transform)} ownerActive={gameObject.activeSelf}/{gameObject.activeInHierarchy} " +
+            $"overlayPath={GetTransformPath(overlayRoot)} tooltipPath={GetTransformPath(tooltipRoot != null ? tooltipRoot.transform : null)} " +
+            $"tooltipActive={(tooltipRoot != null ? tooltipRoot.activeSelf.ToString() : "null")} " +
+            $"fullTextLength={(fullText != null ? fullText.Length : -1)} alignTopLeft={alignTopLeftToSource} " +
+            $"pointerEnter={DescribeGameObjectForLog(pointerEnter)} pointerPress={DescribeGameObjectForLog(pointerPress)} " +
+            $"sourceCanvas={DescribeCanvasForLog(sourceCanvas)} tooltipCanvas={DescribeCanvasForLog(tooltipCanvas)} " +
+            $"ownerRect={DescribeRectTransformForLog(ownerRect)} sourceRect={DescribeRectTransformForLog(sourceRect)} " +
+            $"tooltipRect={DescribeRectTransformForLog(tooltipRect)}";
+    }
+
+    private static string DescribeCanvasForLog(Canvas canvas)
+    {
+        if (canvas == null)
+            return "null";
+
+        return
+            $"{GetTransformPath(canvas.transform)} enabled={canvas.enabled} override={canvas.overrideSorting} " +
+            $"sortingOrder={canvas.sortingOrder} sortingLayer={canvas.sortingLayerID} renderMode={canvas.renderMode} root={canvas.isRootCanvas}";
+    }
+
+    private static string DescribeRectTransformForLog(RectTransform rect)
+    {
+        if (rect == null)
+            return "null";
+
+        return
+            $"{GetTransformPath(rect)} active={rect.gameObject.activeSelf}/{rect.gameObject.activeInHierarchy} " +
+            $"anchored={rect.anchoredPosition} size={rect.rect.size} localPos={rect.localPosition} " +
+            $"worldPos={rect.position} sibling={rect.GetSiblingIndex()}";
+    }
+
+    private static string DescribeGameObjectForLog(GameObject target)
+    {
+        if (target == null)
+            return "null";
+
+        return $"{GetTransformPath(target.transform)} active={target.activeSelf}/{target.activeInHierarchy}";
+    }
+
+    private static string GetTransformPath(Transform target)
+    {
+        if (target == null)
+            return "null";
+
+        string path = target.name;
+        Transform current = target.parent;
+        while (current != null)
+        {
+            path = current.name + "/" + path;
+            current = current.parent;
+        }
+
+        return path;
     }
 }

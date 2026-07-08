@@ -652,7 +652,8 @@ namespace XRVLC.Tests
             StringAssert.Contains("totalTimeText.enabled = true", source);
             StringAssert.Contains("speedBtnText.enabled = true", source);
             StringAssert.Contains("string.IsNullOrWhiteSpace(media.Title)", source);
-            StringAssert.Contains("\"未知视频\"", source);
+            StringAssert.Contains("XrUiText.Get(XrUiTextKey.TitlePlaceholder)", source);
+            StringAssert.Contains("XrUiText.Get(XrUiTextKey.UnknownVideo)", source);
         }
 
         [Test]
@@ -1769,13 +1770,13 @@ namespace XRVLC.Tests
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/Settings/SettingsMenuController.cs"));
 
-            StringAssert.Contains("播放", source);
-            StringAssert.Contains("快捷键", source);
-            StringAssert.Contains("CreateTabButton(tabBar, SettingsTab.Gesture, \"快捷键\")", source);
+            StringAssert.Contains("XrUiTextKey.SettingsTabPlayback", source);
+            StringAssert.Contains("XrUiTextKey.SettingsTabGesture", source);
+            StringAssert.Contains("CreateTabButton(tabBar, SettingsTab.Gesture, XrUiText.Get(XrUiTextKey.SettingsTabGesture))", source);
             StringAssert.DoesNotContain("CreateTabButton(tabBar, SettingsTab.Gesture, \"手势\")", source);
-            StringAssert.Contains("字幕", source);
-            StringAssert.Contains("视频", source);
-            StringAssert.Contains("音频", source);
+            StringAssert.Contains("XrUiTextKey.SettingsTabSubtitle", source);
+            StringAssert.Contains("XrUiTextKey.SettingsTabVideo", source);
+            StringAssert.Contains("XrUiTextKey.SettingsTabAudio", source);
             StringAssert.Contains("ShortcutSettingsService.LoadShortcutMappings", source);
             StringAssert.Contains("ShortcutSettingsService.SaveShortcutMappings", source);
             StringAssert.Contains("CreatePlaybackRateStepper(root.transform)", source);
@@ -1790,9 +1791,9 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("ApplyVideoScaleMode", source);
             StringAssert.Contains("VlcPlaybackBridge.SetAudioChannelMode", source);
             StringAssert.Contains("_audioBoostSwitchButton", source);
-            StringAssert.Contains("CreateSwitchRow(root.transform, \"AudioBoostSwitchRow\", \"音量增益\", ToggleAudioBoost)", source);
+            StringAssert.Contains("CreateSwitchRow(root.transform, \"AudioBoostSwitchRow\", XrUiText.Get(XrUiTextKey.SettingsAudioBoost), ToggleAudioBoost)", source);
             StringAssert.Contains("_mixToMonoSwitchButton", source);
-            StringAssert.Contains("CreateSwitchRow(root.transform, \"MixToMonoSwitchRow\", \"混合为单声道\", ToggleMixToMono)", source);
+            StringAssert.Contains("CreateSwitchRow(root.transform, \"MixToMonoSwitchRow\", XrUiText.Get(XrUiTextKey.SettingsAudioMono), ToggleMixToMono)", source);
             StringAssert.Contains("UpdateMixToMonoSwitch()", source);
             StringAssert.Contains("_mixToMonoEnabled = VlcPlaybackBridge.ShouldMixAudioToMono()", source);
             StringAssert.DoesNotContain("CreateSectionLabel(root.transform, \"声道输出\")", source);
@@ -1881,12 +1882,12 @@ namespace XRVLC.Tests
             string videoTab = ExtractMethodBody(source, "private void BuildVideoTab");
 
             StringAssert.Contains("CreateVideoAspectRatioDropdown(root.transform)", videoTab);
-            StringAssert.Contains("宽高比", source);
+            StringAssert.Contains("XrUiTextKey.SettingsAspectRatio", source);
             StringAssert.Contains("VideoAspectRatioDropdown", source);
             StringAssert.Contains("VideoAspectRatioRow", source);
             StringAssert.Contains("XrDropdown _videoAspectRatioDropdown", source);
             StringAssert.Contains("ApplyVideoAspectRatioFromDropdown", source);
-            StringAssert.Contains("\"自动\"", source);
+            StringAssert.Contains("XrUiTextKey.SettingsAspectRatioAuto", source);
             StringAssert.Contains("\"16:9\"", source);
             StringAssert.Contains("\"4:3\"", source);
             StringAssert.Contains("\"16:10\"", source);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using XRVLC.Localization;
 using XRVLC.Media;
 
 /// <summary>
@@ -115,7 +116,7 @@ public class PlaylistPanelController : MonoBehaviour
         if (_playlist.Count == 0)
         {
             _isBindingDropdown = true;
-            playlistDropdown.SetPlaceholder("暂无播放列表");
+            playlistDropdown.SetPlaceholder(XrUiText.Get(XrUiTextKey.PlaylistEmpty));
             _isBindingDropdown = false;
             return;
         }
@@ -156,7 +157,7 @@ public class PlaylistPanelController : MonoBehaviour
     private static string DecodeDisplayTitle(string title)
     {
         if (string.IsNullOrWhiteSpace(title))
-            return "未知视频";
+            return XrUiText.Get(XrUiTextKey.UnknownVideo);
 
         try
         {

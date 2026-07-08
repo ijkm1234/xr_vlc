@@ -6,6 +6,7 @@ using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 using TMPro;
 using XRVLC.Infrastructure.Pico;
+using XRVLC.Localization;
 using XRVLC.UI.XR;
 
 public class VRUIManager : MonoBehaviour
@@ -61,7 +62,6 @@ public class VRUIManager : MonoBehaviour
     private const float MinWorldCanvasDynamicPixelsPerUnit = 24f;
     private const float UiTextSharpness = 0.35f;
     private const int AndroidStreamMusic = 3;
-    private const string ChooseSubtitleTrackOptionLabel = "选择其他字幕";
     private static readonly System.Collections.Generic.HashSet<string> SubtitleLanguageSuffixes =
         new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -275,12 +275,14 @@ public class VRUIManager : MonoBehaviour
             shortcutConfigPanel.gameObject.SetActive(false);
 
         EnsureRuntimeTextVisible();
+        if (titleScroller != null)
+            titleScroller.SetText(XrUiText.Get(XrUiTextKey.TitlePlaceholder));
         ConfigureUiCanvasClarity();
         ConfigureUiTextEdgeClarity();
         ConfigureSecondaryDropdown(audioTrackDropdown, true);
         ConfigureSecondaryDropdown(subtitleTrackDropdown, true);
-        InitializeTrackDropdownDefault(audioTrackDropdown, "无音轨");
-        InitializeTrackDropdownDefault(subtitleTrackDropdown, "无字幕");
+        InitializeTrackDropdownDefault(audioTrackDropdown, XrUiText.Get(XrUiTextKey.AudioTrackNone));
+        InitializeTrackDropdownDefault(subtitleTrackDropdown, XrUiText.Get(XrUiTextKey.SubtitleTrackNone));
 
         ApplyIconSprites();
         UpdateSeeThroughButtonPassthroughVisual();
@@ -1600,23 +1602,23 @@ public class VRUIManager : MonoBehaviour
         layout.childForceExpandWidth = true;
         layout.childForceExpandHeight = false;
 
-        CreateGeometrySectionLabel(menu.transform, "投影模式");
+        CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryProjection));
         Transform projectionRow = CreateGeometryRow(menu.transform, "ProjectionRow");
-        _projectionFlatButton = CreateGeometryOptionButton(projectionRow, "平面", () => SetGeometryProjection(XRVLC.VideoProjection.Flat));
-        _projection180Button = CreateGeometryOptionButton(projectionRow, "180全景", () => SetGeometryProjection(XRVLC.VideoProjection.Sphere180));
-        _projection360Button = CreateGeometryOptionButton(projectionRow, "360全景", () => SetGeometryProjection(XRVLC.VideoProjection.Sphere360));
+        _projectionFlatButton = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjectionFlat), () => SetGeometryProjection(XRVLC.VideoProjection.Flat));
+        _projection180Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection180), () => SetGeometryProjection(XRVLC.VideoProjection.Sphere180));
+        _projection360Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection360), () => SetGeometryProjection(XRVLC.VideoProjection.Sphere360));
 
-        CreateGeometrySectionLabel(menu.transform, "3D 格式");
+        CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo));
         Transform stereoRow = CreateGeometryRow(menu.transform, "StereoRow");
-        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, "无3D", () => SetGeometryStereo(XRVLC.StereoMode.Mono));
-        _stereoTopBottomButton = CreateGeometryOptionButton(stereoRow, "上下3D", () => SetGeometryStereo(XRVLC.StereoMode.TopBottom));
-        _stereoLeftRightButton = CreateGeometryOptionButton(stereoRow, "左右3D", () => SetGeometryStereo(XRVLC.StereoMode.LeftRight));
+        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoMono), () => SetGeometryStereo(XRVLC.StereoMode.Mono));
+        _stereoTopBottomButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoTopBottom), () => SetGeometryStereo(XRVLC.StereoMode.TopBottom));
+        _stereoLeftRightButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoLeftRight), () => SetGeometryStereo(XRVLC.StereoMode.LeftRight));
 
-        _curveSectionLabel = CreateGeometrySectionLabel(menu.transform, "平面弧度").gameObject;
+        _curveSectionLabel = CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryCurve)).gameObject;
         _curveRow = CreateGeometryRow(menu.transform, "CurveRow");
-        _curveNoneButton = CreateGeometryOptionButton(_curveRow, "无曲面", () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.None));
-        _curveSmallButton = CreateGeometryOptionButton(_curveRow, "小曲面", () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Small));
-        _curveLargeButton = CreateGeometryOptionButton(_curveRow, "大曲面", () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Large));
+        _curveNoneButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveNone), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.None));
+        _curveSmallButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveSmall), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Small));
+        _curveLargeButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveLarge), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Large));
 
         UpdateGeometrySelectionHighlights();
         geometryMenu.SetActive(false);
@@ -2484,11 +2486,11 @@ public class VRUIManager : MonoBehaviour
 
     private static string GetDisplayTitle(XRVLC.Media.MediaWrapper media)
     {
-        if (media == null) return "未知视频";
+        if (media == null) return XrUiText.Get(XrUiTextKey.UnknownVideo);
         if (!string.IsNullOrWhiteSpace(media.Title))
             return media.Title;
         if (string.IsNullOrWhiteSpace(media.Uri))
-            return "未知视频";
+            return XrUiText.Get(XrUiTextKey.UnknownVideo);
 
         string value = media.Uri;
         int queryIndex = value.IndexOf('?');
@@ -2500,7 +2502,7 @@ public class VRUIManager : MonoBehaviour
             value = value.Substring(slashIndex + 1);
 
         if (string.IsNullOrWhiteSpace(value))
-            return "未知视频";
+            return XrUiText.Get(XrUiTextKey.UnknownVideo);
 
         try
         {
@@ -2990,7 +2992,7 @@ public class VRUIManager : MonoBehaviour
         }
         if (_openAudioTracks.Count == 0)
         {
-            audioTrackDropdown.SetPlaceholder("无音轨");
+            audioTrackDropdown.SetPlaceholder(XrUiText.Get(XrUiTextKey.AudioTrackNone));
             Debug.Log(
                 "[VRUIManager][TrackDropdown] updateAudio return reason=noAudioTracks");
             return;
@@ -3026,7 +3028,7 @@ public class VRUIManager : MonoBehaviour
         var options = new System.Collections.Generic.List<XrDropdownItemData>();
         int selectedIndex = _openSubtitleTracks.Count > 0 ? ResolveSelectedTrackIndex(_openSubtitleTracks, false) + 1 : 0;
         options.Add(new XrDropdownItemData(
-            ChooseSubtitleTrackOptionLabel,
+            XrUiText.Get(XrUiTextKey.SubtitleTrackChooseOther),
             showBottomSeparator: true,
             onSelected: OnChooseSubtitleTrackItemSelected));
         for (int i = 0; i < _openSubtitleTracks.Count; i++)
@@ -3074,7 +3076,7 @@ public class VRUIManager : MonoBehaviour
     private static string GetSubtitleTrackDisplayNameForMedia(XRVLC.Media.TrackInfo track, XRVLC.Media.MediaWrapper media)
     {
         if (track == null)
-            return "未知字幕";
+            return XrUiText.Get(XrUiTextKey.UnknownSubtitle);
 
         string displaySource = !string.IsNullOrWhiteSpace(track.Slave?.uri)
             ? track.Slave.uri
@@ -3086,7 +3088,7 @@ public class VRUIManager : MonoBehaviour
     private static string NormalizeSubtitleTrackDisplayName(string value, XRVLC.Media.MediaWrapper media)
     {
         if (string.IsNullOrWhiteSpace(value))
-            return "未知字幕";
+            return XrUiText.Get(XrUiTextKey.UnknownSubtitle);
 
         string fileName = value.Trim();
         int queryIndex = fileName.IndexOf('?');

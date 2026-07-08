@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using XRVLC.Localization;
 using XRVLC.Media;
 
 public static class VlcPlaybackPayloadParser
@@ -168,11 +169,11 @@ public static class VlcPlaybackPayloadParser
 
     private static string BuildTitleFromUri(string uri)
     {
-        if (string.IsNullOrEmpty(uri)) return "未知视频";
+        if (string.IsNullOrEmpty(uri)) return XrUiText.Get(XrUiTextKey.UnknownVideo);
 
         int slash = Math.Max(uri.LastIndexOf('/'), uri.LastIndexOf('\\'));
         string title = slash >= 0 && slash + 1 < uri.Length ? uri.Substring(slash + 1) : uri;
-        return string.IsNullOrEmpty(title) ? "未知视频" : title;
+        return string.IsNullOrEmpty(title) ? XrUiText.Get(XrUiTextKey.UnknownVideo) : title;
     }
 
     private static string DecodeBridgeUri(string uri)

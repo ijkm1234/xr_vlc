@@ -203,9 +203,9 @@ namespace XRVLC.Tests
             string dropdown = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
             string scene = File.ReadAllText(ProjectFile("Assets/Scenes/MainVRScene.unity"));
 
-            StringAssert.Contains("new XrDropdownItemData(\"无操作\")", settings);
-            StringAssert.Contains("new XrDropdownItemData(\"切换 2x 速度\")", settings);
-            StringAssert.Contains("new XrDropdownItemData(\"切换字幕\")", settings);
+            StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.None))", settings);
+            StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.Toggle2xSpeed))", settings);
+            StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle))", settings);
             StringAssert.Contains("Instantiate(shortcutDropdownPrefab, row, false)", settings);
             StringAssert.Contains("Debug.LogError(\"[SettingsMenuController] shortcutDropdownPrefab is not assigned.", settings);
             StringAssert.DoesNotContain("CreateFallbackShortcutDropdown", settings);
@@ -260,21 +260,18 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("private const string IconResourcePath = \"UI/IconPark/\"", settings);
             StringAssert.Contains("private const string GestureInfoIconName = \"info\"", settings);
-            StringAssert.Contains("private const float GestureSectionTitleWidth = 112f", settings);
+            StringAssert.Contains("private const float GestureSectionTitleMinWidth = 112f", settings);
             StringAssert.Contains("private const float GestureInfoIconGap = 6f", settings);
-            StringAssert.Contains("摇杆左右：步进/步退\\n\" +", settings);
-            StringAssert.Contains("摇杆左右长按：30s 快进/快退\\n\" +", settings);
-            StringAssert.Contains("摇杆前后：调整屏幕距离\\n\" +", settings);
-            StringAssert.Contains("板机键长按：2x 快速播放\\n\" +", settings);
-            StringAssert.Contains("抓取键：移动屏幕\\n\" +", settings);
-            StringAssert.Contains("按下摇杆：重置屏幕位置", settings);
-            StringAssert.Contains("CreateSectionLabel(root.transform, \"手柄快捷键\", true)", settings);
-            StringAssert.Contains("CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleWidth, 36f)", settings);
+            StringAssert.Contains("XrUiText.Get(XrUiTextKey.SettingsGestureInfoTooltip)", settings);
+            StringAssert.Contains("CreateSectionLabel(root.transform, XrUiText.Get(XrUiTextKey.SettingsSectionShortcuts), true)", settings);
+            StringAssert.Contains("TextMeshProUGUI title = CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleMinWidth, 36f)", settings);
+            StringAssert.Contains("FitTextLayoutWidth(title, label, GestureSectionTitleMinWidth", settings);
             StringAssert.Contains("CreateSpacer(row, GestureInfoIconGap, 36f)", settings);
             StringAssert.Contains("CreateGestureInfoButton(row)", settings);
             StringAssert.Contains("Resources.Load<Sprite>(IconResourcePath + GestureInfoIconName)", settings);
             StringAssert.Contains("tooltip.alignTopLeftToSource = true", settings);
-            StringAssert.Contains("tooltip.SetSource(null, GestureShortcutTooltipText)", settings);
+            StringAssert.Contains("tooltip.onBeforeShow.AddListener(() => CloseOtherDropdowns(null))", settings);
+            StringAssert.Contains("tooltip.SetSource(null, XrUiText.Get(XrUiTextKey.SettingsGestureInfoTooltip))", settings);
             StringAssert.DoesNotContain("CreateText(button.transform, \"i\"", settings);
         }
 
@@ -282,12 +279,21 @@ namespace XRVLC.Tests
         public void InfoTooltipUsesOpaqueBackgroundAndTopLeftSourceAlignment()
         {
             string tooltip = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrOverflowTooltip.cs"));
+            string dropdown = File.ReadAllText(ProjectFile("Assets/Scripts/UI/Common/XrDropdown.cs"));
 
             StringAssert.Contains("TooltipBackgroundColor = new Color(0.04f, 0.04f, 0.04f, 1f)", tooltip);
             StringAssert.Contains("EnsureTooltipRootLayout()", tooltip);
             StringAssert.Contains("layoutElement.ignoreLayout = true", tooltip);
             StringAssert.Contains("ApplyTooltipRootStyle()", tooltip);
             StringAssert.Contains("rootImage.color = TooltipBackgroundColor", tooltip);
+            StringAssert.Contains("private const int TooltipSortingOrder = 30000", tooltip);
+            StringAssert.Contains("private const int PopupBaseSortingOrder = 500", dropdown);
+            StringAssert.Contains("EnsureTooltipCanvasPriority()", tooltip);
+            StringAssert.Contains("canvas.overrideSorting = true", tooltip);
+            StringAssert.Contains("canvas.sortingOrder = TooltipSortingOrder", tooltip);
+            StringAssert.Contains("tooltipRoot.SetActive(true);\n        EnsureTooltipCanvasPriority();", tooltip);
+            StringAssert.Contains("public UnityEvent onBeforeShow = new UnityEvent()", tooltip);
+            StringAssert.Contains("onBeforeShow.Invoke()", tooltip);
             StringAssert.Contains("public bool alignTopLeftToSource", tooltip);
             StringAssert.Contains("if (alignTopLeftToSource)", tooltip);
             StringAssert.Contains("tooltipRect.pivot = new Vector2(0f, 1f)", tooltip);
@@ -332,9 +338,9 @@ namespace XRVLC.Tests
         {
             string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
-            StringAssert.Contains("CreateGeometrySectionLabel(menu.transform, \"投影模式\")", vr);
-            StringAssert.Contains("CreateGeometrySectionLabel(menu.transform, \"3D 格式\")", vr);
-            StringAssert.Contains("_curveSectionLabel = CreateGeometrySectionLabel(menu.transform, \"平面弧度\").gameObject", vr);
+            StringAssert.Contains("CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryProjection))", vr);
+            StringAssert.Contains("CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo))", vr);
+            StringAssert.Contains("_curveSectionLabel = CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryCurve)).gameObject", vr);
             StringAssert.Contains("_curveRow = CreateGeometryRow(menu.transform, \"CurveRow\")", vr);
             StringAssert.Contains("UpdateGeometryCascadeVisibility()", vr);
             StringAssert.Contains("bool showFlatCurveOptions = _geometryProjection == XRVLC.VideoProjection.Flat", vr);

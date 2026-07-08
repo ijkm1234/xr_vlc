@@ -31,7 +31,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("public XrDropdown playlistDropdown", source);
             StringAssert.Contains("new XrDropdownItemData(title, duration, i)", source);
             StringAssert.Contains("playlistDropdown.SetItems(items, selectedIndex)", source);
-            StringAssert.Contains("playlistDropdown.SetPlaceholder(\"暂无播放列表\")", source);
+            StringAssert.Contains("playlistDropdown.SetPlaceholder(XrUiText.Get(XrUiTextKey.PlaylistEmpty))", source);
             StringAssert.Contains("VlcPlaybackBridge.SkipToIndex(index)", source);
             StringAssert.Contains("VlcPlaybackPayloadParser.ParsePlaylist(json)", source);
             StringAssert.DoesNotContain("private static List<PlaylistItemData> Parse", source);

@@ -189,6 +189,7 @@ public sealed class XrDropdown : MonoBehaviour
 
     public void Show()
     {
+        Debug.Log($"[XrDropdown] Show entry {DescribeRenderStateForLog()}");
         if (!interactable || popup == null)
         {
             Debug.LogWarning(
@@ -199,7 +200,9 @@ public sealed class XrDropdown : MonoBehaviour
 
         gameObject.SetActive(true);
         onBeforeShow.Invoke();
+        Debug.Log($"[XrDropdown] Show afterOnBeforeShow {DescribeRenderStateForLog()}");
         EnsureOpenCanvasPriority();
+        Debug.Log($"[XrDropdown] Show afterEnsureOpenCanvasPriority {DescribeRenderStateForLog()}");
         popup.SetActive(true);
         ApplyLayout();
         RefreshRows();
@@ -213,11 +216,13 @@ public sealed class XrDropdown : MonoBehaviour
 
     public void Hide()
     {
+        Debug.Log($"[XrDropdown] Hide entry {DescribeRenderStateForLog()}");
         if (popup != null)
             popup.SetActive(false);
         ApplyLayout();
         ResetOpenCanvasPriority();
         ResetCaptionGraphicState();
+        Debug.Log($"[XrDropdown] Hide exit {DescribeRenderStateForLog()}");
     }
 
     public void Toggle()
@@ -230,6 +235,7 @@ public sealed class XrDropdown : MonoBehaviour
 
     public void CloseImmediately()
     {
+        Debug.Log($"[XrDropdown] CloseImmediately entry {DescribeRenderStateForLog()}");
         Hide();
     }
 
@@ -308,6 +314,21 @@ public sealed class XrDropdown : MonoBehaviour
         return onValueChanged == null
             ? "eventNull=True persistentListeners=-1"
             : $"eventNull=False persistentListeners={onValueChanged.GetPersistentEventCount()}";
+    }
+
+    public string DescribeRenderStateForLog()
+    {
+        Canvas rootCanvas = GetComponent<Canvas>();
+        Canvas popupCanvas = popup != null ? popup.GetComponent<Canvas>() : null;
+        RectTransform rootRect = GetComponent<RectTransform>();
+        RectTransform activePopupRect = popupRect != null ? popupRect : (popup != null ? popup.GetComponent<RectTransform>() : null);
+
+        return
+            $"dropdown={name} path={GetTransformPath(transform)} active={gameObject.activeSelf}/{gameObject.activeInHierarchy} " +
+            $"interactable={interactable} isOpen={IsOpen} showCaption={showCaption} count={_items.Count} value={_value} " +
+            $"popup={DescribeGameObjectForLog(popup)} rootCanvas={DescribeCanvasForLog(rootCanvas)} " +
+            $"popupCanvas={DescribeCanvasForLog(popupCanvas)} rootRect={DescribeRectTransformForLog(rootRect)} " +
+            $"popupRect={DescribeRectTransformForLog(activePopupRect)}";
     }
 
     private void RefreshShownValue()
@@ -535,6 +556,9 @@ public sealed class XrDropdown : MonoBehaviour
         Canvas rootCanvas = EnsureSortedCanvas(gameObject, parentCanvas, rootSortingOrder);
         int popupSortingOrder = NextPopupSortingOrder();
         EnsureSortedCanvas(popup, rootCanvas, popupSortingOrder);
+        Debug.Log(
+            $"[XrDropdown] EnsureOpenCanvasPriority dropdown={name} parentCanvas={DescribeCanvasForLog(parentCanvas)} " +
+            $"rootSortingOrder={rootSortingOrder} popupSortingOrder={popupSortingOrder} {DescribeRenderStateForLog()}");
     }
 
     private static Canvas EnsureSortedCanvas(GameObject target, Canvas referenceCanvas, int sortingOrder)
@@ -561,7 +585,9 @@ public sealed class XrDropdown : MonoBehaviour
 
     private void ResetOpenCanvasPriority()
     {
+        Debug.Log($"[XrDropdown] ResetOpenCanvasPriority entry {DescribeRenderStateForLog()}");
         SetPriorityCanvasEnabled(popup, false);
+        Debug.Log($"[XrDropdown] ResetOpenCanvasPriority exit {DescribeRenderStateForLog()}");
     }
 
     private static void SetPriorityCanvasEnabled(GameObject target, bool enabled)
@@ -663,5 +689,50 @@ public sealed class XrDropdown : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static string DescribeCanvasForLog(Canvas canvas)
+    {
+        if (canvas == null)
+            return "null";
+
+        return
+            $"{GetTransformPath(canvas.transform)} enabled={canvas.enabled} override={canvas.overrideSorting} " +
+            $"sortingOrder={canvas.sortingOrder} sortingLayer={canvas.sortingLayerID} renderMode={canvas.renderMode} root={canvas.isRootCanvas}";
+    }
+
+    private static string DescribeRectTransformForLog(RectTransform rect)
+    {
+        if (rect == null)
+            return "null";
+
+        return
+            $"{GetTransformPath(rect)} active={rect.gameObject.activeSelf}/{rect.gameObject.activeInHierarchy} " +
+            $"anchored={rect.anchoredPosition} size={rect.rect.size} localPos={rect.localPosition} " +
+            $"worldPos={rect.position} sibling={rect.GetSiblingIndex()}";
+    }
+
+    private static string DescribeGameObjectForLog(GameObject target)
+    {
+        if (target == null)
+            return "null";
+
+        return $"{GetTransformPath(target.transform)} active={target.activeSelf}/{target.activeInHierarchy}";
+    }
+
+    private static string GetTransformPath(Transform target)
+    {
+        if (target == null)
+            return "null";
+
+        string path = target.name;
+        Transform current = target.parent;
+        while (current != null)
+        {
+            path = current.name + "/" + path;
+            current = current.parent;
+        }
+
+        return path;
     }
 }

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using XRVLC;
+using XRVLC.Localization;
 using XRVLC.Services.Shortcuts;
 using XRVLC.XR;
 
@@ -103,10 +104,10 @@ public class ShortcutConfigPanel : MonoBehaviour
 
         dropdown.SetItems(new List<XrDropdownItemData>
         {
-            new XrDropdownItemData("None"),
-            new XrDropdownItemData("Toggle 2x speed"),
-            new XrDropdownItemData("Toggle subtitles"),
-            new XrDropdownItemData("Reset screen")
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.None)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.Toggle2xSpeed)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ResetScreenTransform))
         });
         dropdown.onValueChanged.RemoveListener(OnShortcutDropdownChanged);
         dropdown.onValueChanged.AddListener(OnShortcutDropdownChanged);

@@ -4,6 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using XRVLC;
+using XRVLC.Localization;
 using XRVLC.Media;
 using XRVLC.Services.Settings;
 using XRVLC.Services.Shortcuts;
@@ -33,18 +34,11 @@ public class SettingsMenuController : MonoBehaviour
     private static readonly Color TextColor = Color.white;
     private const string IconResourcePath = "UI/IconPark/";
     private const string GestureInfoIconName = "info";
-    private const string GestureShortcutTooltipText =
-        "摇杆左右：步进/步退\n" +
-        "摇杆左右长按：30s 快进/快退\n" +
-        "摇杆前后：调整屏幕距离\n" +
-        "板机键长按：2x 快速播放\n" +
-        "抓取键：移动屏幕\n" +
-        "按下摇杆：重置屏幕位置";
     private const string StepperControlResourcePath = "UI/XrStepperControl";
     private const string AudioChannelStereoValue = "stereo";
     private const string AudioChannelMonoValue = "mono";
     private const float GestureLabelColumnWidthRatio = 0.25f;
-    private const float GestureSectionTitleWidth = 112f;
+    private const float GestureSectionTitleMinWidth = 112f;
     private const float GestureInfoIconSize = 28f;
     private const float GestureInfoIconGap = 6f;
     private const float SwitchWidth = 76f;
@@ -66,7 +60,7 @@ public class SettingsMenuController : MonoBehaviour
     };
     private static readonly string[] VideoAspectRatioLabels =
     {
-        "自动",
+        XrUiTextKey.SettingsAspectRatioAuto,
         "16:9",
         "4:3",
         "16:10",
@@ -172,11 +166,11 @@ public class SettingsMenuController : MonoBehaviour
         {
             ConfigureRoot();
             Transform tabBar = CreateTabBar(transform);
-            CreateTabButton(tabBar, SettingsTab.Playback, "播放");
-            CreateTabButton(tabBar, SettingsTab.Gesture, "快捷键");
-            CreateTabButton(tabBar, SettingsTab.Subtitle, "字幕");
-            CreateTabButton(tabBar, SettingsTab.Video, "视频");
-            CreateTabButton(tabBar, SettingsTab.Audio, "音频");
+            CreateTabButton(tabBar, SettingsTab.Playback, XrUiText.Get(XrUiTextKey.SettingsTabPlayback));
+            CreateTabButton(tabBar, SettingsTab.Gesture, XrUiText.Get(XrUiTextKey.SettingsTabGesture));
+            CreateTabButton(tabBar, SettingsTab.Subtitle, XrUiText.Get(XrUiTextKey.SettingsTabSubtitle));
+            CreateTabButton(tabBar, SettingsTab.Video, XrUiText.Get(XrUiTextKey.SettingsTabVideo));
+            CreateTabButton(tabBar, SettingsTab.Audio, XrUiText.Get(XrUiTextKey.SettingsTabAudio));
 
             Transform contentRoot = CreateContentFrame(transform);
             BuildPlaybackTab(CreateContentRoot(contentRoot, SettingsTab.Playback));
@@ -290,12 +284,12 @@ public class SettingsMenuController : MonoBehaviour
 
     private void BuildPlaybackTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "播放速度");
+        CreateSectionLabel(root.transform, XrUiText.Get(XrUiTextKey.SettingsSectionPlaybackSpeed));
         CreatePlaybackRateStepper(root.transform);
         _seekSecondsStepper = CreateStepperRow(
             root.transform,
             "ShortcutSeekSecondsRow",
-            "步进时长",
+            XrUiText.Get(XrUiTextKey.SettingsSeekStep),
             ShortcutSettingsService.DefaultSeekSeconds.ToString(CultureInfo.InvariantCulture),
             () => StepSeekSeconds(-1),
             () => StepSeekSeconds(1),
@@ -304,23 +298,23 @@ public class SettingsMenuController : MonoBehaviour
 
     private void BuildGestureTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "手柄快捷键", true);
-        _leftStickClickDropdown = CreateShortcutDropdown(root.transform, "左摇杆按下");
-        _rightStickClickDropdown = CreateShortcutDropdown(root.transform, "右摇杆按下");
-        _buttonYDropdown = CreateShortcutDropdown(root.transform, "Y 按钮");
-        _buttonBDropdown = CreateShortcutDropdown(root.transform, "B 按钮");
+        CreateSectionLabel(root.transform, XrUiText.Get(XrUiTextKey.SettingsSectionShortcuts), true);
+        _leftStickClickDropdown = CreateShortcutDropdown(root.transform, XrUiText.Get(XrUiTextKey.SettingsLeftStickClick));
+        _rightStickClickDropdown = CreateShortcutDropdown(root.transform, XrUiText.Get(XrUiTextKey.SettingsRightStickClick));
+        _buttonYDropdown = CreateShortcutDropdown(root.transform, XrUiText.Get(XrUiTextKey.SettingsButtonY));
+        _buttonBDropdown = CreateShortcutDropdown(root.transform, XrUiText.Get(XrUiTextKey.SettingsButtonB));
         LoadGestureValues();
     }
 
     private void BuildSubtitleTab(GameObject root)
     {
-        CreateSectionLabel(root.transform, "字幕");
-        _spatialSubtitleSwitchButton = CreateSwitchRow(root.transform, "SpatialSubtitleSwitchRow", "使用空间字幕", ToggleSpatialSubtitles);
-        _outsideSubtitleSwitchButton = CreateSwitchRow(root.transform, "SubtitleOutsideSwitchRow", "渲染在屏幕外", ToggleRenderSubtitlesOutsideScreen);
+        CreateSectionLabel(root.transform, XrUiText.Get(XrUiTextKey.SettingsSectionSubtitle));
+        _spatialSubtitleSwitchButton = CreateSwitchRow(root.transform, "SpatialSubtitleSwitchRow", XrUiText.Get(XrUiTextKey.SettingsSpatialSubtitles), ToggleSpatialSubtitles);
+        _outsideSubtitleSwitchButton = CreateSwitchRow(root.transform, "SubtitleOutsideSwitchRow", XrUiText.Get(XrUiTextKey.SettingsSubtitlesOutside), ToggleRenderSubtitlesOutsideScreen);
         _subtitleDelayStepper = CreateStepperRow(
             root.transform,
             "SubtitleDelayRow",
-            "字幕延迟",
+            XrUiText.Get(XrUiTextKey.SettingsSubtitleDelay),
             "0.0",
             () => StepSubtitleDelay(-0.5f),
             () => StepSubtitleDelay(0.5f),
@@ -332,7 +326,7 @@ public class SettingsMenuController : MonoBehaviour
         _playbackRateStepper = CreateStepperRow(
             parent,
             "PlaybackRateStepperRow",
-            "倍速",
+            XrUiText.Get(XrUiTextKey.SettingsPlaybackRate),
             "1.00",
             () => StepPlaybackRate(-0.25f),
             () => StepPlaybackRate(0.25f),
@@ -346,14 +340,14 @@ public class SettingsMenuController : MonoBehaviour
 
     private void BuildAudioTab(GameObject root)
     {
-        _audioBoostSwitchButton = CreateSwitchRow(root.transform, "AudioBoostSwitchRow", "音量增益", ToggleAudioBoost);
-        _mixToMonoSwitchButton = CreateSwitchRow(root.transform, "MixToMonoSwitchRow", "混合为单声道", ToggleMixToMono);
+        _audioBoostSwitchButton = CreateSwitchRow(root.transform, "AudioBoostSwitchRow", XrUiText.Get(XrUiTextKey.SettingsAudioBoost), ToggleAudioBoost);
+        _mixToMonoSwitchButton = CreateSwitchRow(root.transform, "MixToMonoSwitchRow", XrUiText.Get(XrUiTextKey.SettingsAudioMono), ToggleMixToMono);
     }
 
     private XrDropdown CreateVideoAspectRatioDropdown(Transform parent)
     {
         Transform row = CreateRow(parent, "VideoAspectRatioRow");
-        CreateText(row, "宽高比", menuFontSize, TextAlignmentOptions.Left, 180f, shortcutDropdownHeight);
+        CreateText(row, XrUiText.Get(XrUiTextKey.SettingsAspectRatio), menuFontSize, TextAlignmentOptions.Left, 180f, shortcutDropdownHeight);
 
         if (shortcutDropdownPrefab == null)
         {
@@ -543,10 +537,10 @@ public class SettingsMenuController : MonoBehaviour
 
         dropdown.SetItems(new List<XrDropdownItemData>
         {
-            new XrDropdownItemData("无操作"),
-            new XrDropdownItemData("切换 2x 速度"),
-            new XrDropdownItemData("切换字幕"),
-            new XrDropdownItemData("恢复屏幕默认位置")
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.None)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.Toggle2xSpeed)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ResetScreenTransform))
         });
         dropdown.onBeforeShow.AddListener(() => CloseOtherShortcutDropdowns(dropdown));
         dropdown.onValueChanged.AddListener(_ => SaveGestureMappings());
@@ -561,19 +555,59 @@ public class SettingsMenuController : MonoBehaviour
 
     private void CloseOtherDropdowns(XrDropdown keepOpen)
     {
+        Debug.Log(
+            $"[SettingsMenuController] CloseOtherDropdowns entry keepOpen={DescribeDropdownNameForLog(keepOpen)} " +
+            $"{DescribeDropdownStatesForLog()}");
         CloseShortcutDropdownIfNot(_leftStickClickDropdown, keepOpen);
         CloseShortcutDropdownIfNot(_rightStickClickDropdown, keepOpen);
         CloseShortcutDropdownIfNot(_buttonYDropdown, keepOpen);
         CloseShortcutDropdownIfNot(_buttonBDropdown, keepOpen);
         CloseShortcutDropdownIfNot(_videoAspectRatioDropdown, keepOpen);
+        Debug.Log(
+            $"[SettingsMenuController] CloseOtherDropdowns exit keepOpen={DescribeDropdownNameForLog(keepOpen)} " +
+            $"{DescribeDropdownStatesForLog()}");
     }
 
     private static void CloseShortcutDropdownIfNot(XrDropdown dropdown, XrDropdown keepOpen)
     {
-        if (dropdown == null || dropdown == keepOpen || !dropdown.IsOpen)
+        if (dropdown == null)
             return;
 
+        if (dropdown == keepOpen)
+        {
+            Debug.Log($"[SettingsMenuController] CloseDropdown skip reason=keepOpen {dropdown.DescribeRenderStateForLog()}");
+            return;
+        }
+
+        if (!dropdown.IsOpen)
+        {
+            Debug.Log($"[SettingsMenuController] CloseDropdown skip reason=alreadyClosed {dropdown.DescribeRenderStateForLog()}");
+            return;
+        }
+
+        Debug.Log($"[SettingsMenuController] CloseDropdown closing {dropdown.DescribeRenderStateForLog()}");
         dropdown.CloseImmediately();
+        Debug.Log($"[SettingsMenuController] CloseDropdown closed {dropdown.DescribeRenderStateForLog()}");
+    }
+
+    private string DescribeDropdownStatesForLog()
+    {
+        return
+            $"left=[{DescribeDropdownForLog(_leftStickClickDropdown)}] " +
+            $"right=[{DescribeDropdownForLog(_rightStickClickDropdown)}] " +
+            $"buttonY=[{DescribeDropdownForLog(_buttonYDropdown)}] " +
+            $"buttonB=[{DescribeDropdownForLog(_buttonBDropdown)}] " +
+            $"aspect=[{DescribeDropdownForLog(_videoAspectRatioDropdown)}]";
+    }
+
+    private static string DescribeDropdownForLog(XrDropdown dropdown)
+    {
+        return dropdown != null ? dropdown.DescribeRenderStateForLog() : "null";
+    }
+
+    private static string DescribeDropdownNameForLog(XrDropdown dropdown)
+    {
+        return dropdown != null ? dropdown.name : "null";
     }
 
     private void ConfigureShortcutDropdownVisual(XrDropdown dropdown)
@@ -708,7 +742,12 @@ public class SettingsMenuController : MonoBehaviour
 
         if (showGestureInfo)
         {
-            CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleWidth, 36f);
+            TextMeshProUGUI title = CreateText(row, label, menuFontSize, TextAlignmentOptions.Left, GestureSectionTitleMinWidth, 36f);
+            FitTextLayoutWidth(
+                title,
+                label,
+                GestureSectionTitleMinWidth,
+                Mathf.Max(GestureSectionTitleMinWidth, menuWidth - sectionTitleLeftPadding - GestureInfoIconGap - GestureInfoIconSize));
             CreateSpacer(row, GestureInfoIconGap, 36f);
             CreateGestureInfoButton(row);
             return;
@@ -752,7 +791,8 @@ public class SettingsMenuController : MonoBehaviour
         XrOverflowTooltip tooltip = item.GetComponent<XrOverflowTooltip>();
         tooltip.SetOverlayRoot(transform);
         tooltip.alignTopLeftToSource = true;
-        tooltip.SetSource(null, GestureShortcutTooltipText);
+        tooltip.onBeforeShow.AddListener(() => CloseOtherDropdowns(null));
+        tooltip.SetSource(null, XrUiText.Get(XrUiTextKey.SettingsGestureInfoTooltip));
     }
 
     private Transform CreateSectionLabelRow(Transform parent, string name)
@@ -816,6 +856,27 @@ public class SettingsMenuController : MonoBehaviour
         text.alignment = alignment;
         text.enableWordWrapping = false;
         return text;
+    }
+
+    private static void FitTextLayoutWidth(TextMeshProUGUI text, string value, float minWidth, float maxWidth)
+    {
+        if (text == null)
+            return;
+
+        text.ForceMeshUpdate();
+        float preferredWidth = text.GetPreferredValues(value ?? string.Empty, Mathf.Infinity, text.rectTransform.rect.height).x;
+        float width = Mathf.Clamp(Mathf.Ceil(preferredWidth), minWidth, Mathf.Max(minWidth, maxWidth));
+
+        RectTransform rect = text.GetComponent<RectTransform>();
+        if (rect != null)
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
+
+        LayoutElement element = text.GetComponent<LayoutElement>();
+        if (element == null)
+            element = text.gameObject.AddComponent<LayoutElement>();
+        element.minWidth = width;
+        element.preferredWidth = width;
+        element.flexibleWidth = 0f;
     }
 
     private void ShowTab(SettingsTab tab)
@@ -1077,8 +1138,13 @@ public class SettingsMenuController : MonoBehaviour
     {
         var items = new List<XrDropdownItemData>(VideoAspectRatioLabels.Length);
         for (int i = 0; i < VideoAspectRatioLabels.Length; i++)
-            items.Add(new XrDropdownItemData(VideoAspectRatioLabels[i]));
+            items.Add(new XrDropdownItemData(GetVideoAspectRatioLabel(VideoAspectRatioLabels[i])));
         return items;
+    }
+
+    private static string GetVideoAspectRatioLabel(string label)
+    {
+        return label == XrUiTextKey.SettingsAspectRatioAuto ? XrUiText.Get(label) : label;
     }
 
     private static int GetVideoAspectRatioIndex(VideoAspectRatio aspectRatio)
