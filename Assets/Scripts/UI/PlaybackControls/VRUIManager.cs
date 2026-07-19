@@ -57,6 +57,7 @@ public class VRUIManager : MonoBehaviour
     private const float SystemTimeTextWidth = 68f;
     private const float SystemStatusFontSize = 26f;
     private const float GeometryMenuFontSize = 22f;
+    private const float GeometryMenuWidth = 760f;
     private const float geometryMenuFlatHeight = 280f;
     private const float geometryMenuPanoramicHeight = 194f;
     private const float MinWorldCanvasDynamicPixelsPerUnit = 24f;
@@ -115,6 +116,7 @@ public class VRUIManager : MonoBehaviour
     public Button subtitleBtn;
     public Button seeThroughBtn;
     public Button threeDBtn;
+    public Button transparentBtn;
     public Button settingsBtn;
 
     [Header("系统滑条")]
@@ -140,6 +142,12 @@ public class VRUIManager : MonoBehaviour
     [Header("视频 Geometry 菜单")]
     public GameObject geometryMenu;
 
+    [Header("透明视频菜单")]
+    public GameObject chromaKeyMenu;
+    public ChromaKeyPanelController chromaKeyPanelController;
+    public Toggle chromaKeyTogglePrefab;
+    public Slider chromaKeySliderPrefab;
+
     [Header("播放列表")]
     public PlaylistPanelController playlistPanel;
 
@@ -149,10 +157,10 @@ public class VRUIManager : MonoBehaviour
     [Header("XR UI 路由")]
     public XrUiInputGate uiInputGate;
 
-    private XRVLC.Media.PlaybackService playbackService;
-    private PicoPassthroughModeService passthroughModeService;
-    private bool isPanelVisible = true;
-    private bool _isUpdatingSlider = false;
+        private XRVLC.Media.PlaybackService playbackService;
+        private PicoPassthroughModeService passthroughModeService;
+        private bool isPanelVisible = true;
+        private bool _isUpdatingSlider = false;
 
     private float _hideTimer = 0f;
     private const float PanelVisibleDuration = 3f;
@@ -169,9 +177,17 @@ public class VRUIManager : MonoBehaviour
     private XRVLC.VideoProjection _geometryProjection = XRVLC.VideoProjection.Flat;
     private XRVLC.StereoMode _geometryStereo = XRVLC.StereoMode.Mono;
     private XRVLC.FlatVideoCurveMode _flatCurveMode = XRVLC.FlatVideoCurveMode.None;
+    private XRVLC.FisheyeProjectionFormula _fisheyeProjectionFormula = XRVLC.FisheyeProjectionFormula.Equidistant;
     private Button _projection180Button;
     private Button _projection360Button;
+    private Button _projectionFisheyeButton;
     private Button _projectionFlatButton;
+    private GameObject _fisheyeFormulaSectionLabel;
+    private Transform _fisheyeFormulaRow;
+    private Button _fisheyeEquidistantButton;
+    private Button _fisheyeEquisolidButton;
+    private Button _fisheyeStereographicButton;
+    private Button _fisheyeOrthographicButton;
     private Button _stereoMonoButton;
     private Button _stereoTopBottomButton;
     private Button _stereoLeftRightButton;
@@ -223,6 +239,7 @@ public class VRUIManager : MonoBehaviour
             playbackService.OnBuffering += OnBuffering;
             playbackService.OnAudioTracksChanged += HandleAudioTracksDirty;
             playbackService.OnSubtitleTracksChanged += HandleSubtitleTracksDirty;
+            playbackService.OnChromaKeySettingsChanged += HandleChromaKeySettingsChanged;
         }
         else
         {
@@ -264,13 +281,18 @@ public class VRUIManager : MonoBehaviour
             seeThroughBtn.onClick.AddListener(OnSeeThroughBtnClicked);
         if (threeDBtn != null)
             threeDBtn.onClick.AddListener(OnGeometryBtnClicked);
+        if (transparentBtn != null)
+            transparentBtn.onClick.AddListener(OnTransparentBtnClicked);
         if (settingsBtn != null)
             settingsBtn.onClick.AddListener(OnSettingsBtnClicked);
+        EnsureChromaKeyMenuController();
         EnsureSettingsMenuController();
         if (settingsMenu != null)
             settingsMenu.SetActive(false);
         if (geometryMenu != null)
             geometryMenu.SetActive(false);
+        if (chromaKeyMenu != null)
+            chromaKeyMenu.SetActive(false);
         if (shortcutConfigPanel != null)
             shortcutConfigPanel.gameObject.SetActive(false);
 
@@ -286,10 +308,11 @@ public class VRUIManager : MonoBehaviour
 
         ApplyIconSprites();
         UpdateSeeThroughButtonPassthroughVisual();
+        UpdateTransparentButtonVisual();
         if (playbackService != null)
-            UpdatePlayButtonIcon(playbackService.CurrentStatus);
+            UpdatePlayButtonIcon(playbackService.GetLivePlaybackStatus());
         EnsureLoadingOverlay();
-        SetLoadingVisible(playbackService != null && IsLoadingStatus(playbackService.CurrentStatus));
+        SetLoadingVisible(playbackService != null && IsLoadingStatus(playbackService.GetLivePlaybackStatus()));
         UpdateSystemStatus();
 
         RegisterUiTreeNodes();
@@ -509,6 +532,7 @@ public class VRUIManager : MonoBehaviour
         return IsAnyTrackDropdownOpen()
             || IsSettingsMenuOpen()
             || (geometryMenu != null && geometryMenu.activeSelf)
+            || (chromaKeyMenu != null && chromaKeyMenu.activeSelf)
             || IsSystemSliderOpen()
             || IsPlaylistOpen()
             || (shortcutConfigPanel != null && shortcutConfigPanel.gameObject.activeSelf);
@@ -539,6 +563,12 @@ public class VRUIManager : MonoBehaviour
 
         if (geometryMenu != null && geometryMenu.activeSelf &&
             (IsSelfOrChildOf(target, geometryMenu) || IsSelfOrChildOf(target, threeDBtn != null ? threeDBtn.gameObject : null)))
+        {
+            return true;
+        }
+
+        if (chromaKeyMenu != null && chromaKeyMenu.activeSelf &&
+            (IsSelfOrChildOf(target, chromaKeyMenu) || IsSelfOrChildOf(target, transparentBtn != null ? transparentBtn.gameObject : null)))
         {
             return true;
         }
@@ -731,6 +761,7 @@ public class VRUIManager : MonoBehaviour
         RegisterUiNode("subtitle-dropdown", "control-panel", subtitleTrackDropdown != null ? subtitleTrackDropdown.gameObject : null, XrUiNodeLayer.Popup);
         RegisterUiNode("settings-menu", "control-panel", settingsMenu, XrUiNodeLayer.Popup, panelConsumer);
         RegisterUiNode("geometry-menu", "control-panel", geometryMenu, XrUiNodeLayer.Popup, panelConsumer);
+        RegisterUiNode("chroma-key-menu", "control-panel", chromaKeyMenu, XrUiNodeLayer.Popup, panelConsumer);
         RegisterUiNode("system-slider-popup", "control-panel", systemSliderPopup, XrUiNodeLayer.Popup, panelConsumer);
         RegisterUiNode("playlist-panel", "control-panel", playlistPanel != null ? playlistPanel.panelRoot : null, XrUiNodeLayer.Popup, panelConsumer);
         RegisterUiNode("shortcut-config-panel", "settings-menu", shortcutConfigPanel != null ? shortcutConfigPanel.gameObject : null, XrUiNodeLayer.Modal, panelConsumer);
@@ -799,6 +830,7 @@ public class VRUIManager : MonoBehaviour
             || IsSelfOrChildOf(target, ActiveDropdownList(subtitleTrackDropdown))
             || IsSelfOrChildOf(target, settingsMenu)
             || IsSelfOrChildOf(target, geometryMenu)
+            || IsSelfOrChildOf(target, chromaKeyMenu)
             || IsSelfOrChildOf(target, systemSliderPopup)
             || IsSelfOrChildOf(target, shortcutConfigPanel != null ? shortcutConfigPanel.gameObject : null)
             || IsSelfOrChildOf(target, playlistPanel != null ? playlistPanel.panelRoot : null);
@@ -825,12 +857,15 @@ public class VRUIManager : MonoBehaviour
             playbackService.OnBuffering -= OnBuffering;
             playbackService.OnAudioTracksChanged -= HandleAudioTracksDirty;
             playbackService.OnSubtitleTracksChanged -= HandleSubtitleTracksDirty;
+            playbackService.OnChromaKeySettingsChanged -= HandleChromaKeySettingsChanged;
         }
 
         if (settingsBtn != null)
             settingsBtn.onClick.RemoveListener(OnSettingsBtnClicked);
         if (threeDBtn != null)
             threeDBtn.onClick.RemoveListener(OnGeometryBtnClicked);
+        if (transparentBtn != null)
+            transparentBtn.onClick.RemoveListener(OnTransparentBtnClicked);
         if (seeThroughBtn != null)
             seeThroughBtn.onClick.RemoveListener(OnSeeThroughBtnClicked);
         if (brightnessBtn != null)
@@ -853,7 +888,8 @@ public class VRUIManager : MonoBehaviour
 
     private void OnBuffering(float buffering)
     {
-        SetLoadingVisible(buffering < 100f);
+        // Loading visibility follows the real VLC state event. Buffer percentage
+        // alone is not a reliable transition to Playing.
     }
 
     private static bool IsLoadingStatus(XRVLC.Media.PlayerStatus status)
@@ -1466,7 +1502,8 @@ public class VRUIManager : MonoBehaviour
     {
         if (seeThroughBtn == null) return;
 
-        seeThroughBtn.interactable = supported;
+        bool chromaKeyLocked = playbackService != null && playbackService.CurrentChromaKeySettings.Enabled;
+        seeThroughBtn.interactable = supported && !chromaKeyLocked;
         Image image = seeThroughBtn.GetComponent<Image>();
         if (image == null) return;
 
@@ -1477,6 +1514,95 @@ public class VRUIManager : MonoBehaviour
         }
 
         ApplyRuntimeButtonTheme(seeThroughBtn, image, enabled);
+        if (chromaKeyLocked)
+        {
+            ColorBlock colors = seeThroughBtn.colors;
+            colors.disabledColor = PassthroughSelectedColor;
+            seeThroughBtn.colors = colors;
+        }
+    }
+
+    private void OnTransparentBtnClicked()
+    {
+        EnsureChromaKeyMenuController();
+        if (chromaKeyMenu == null || chromaKeyPanelController == null)
+            return;
+
+        bool show = !chromaKeyPanelController.IsOpen;
+        CloseSecondaryPopups(show ? chromaKeyMenu : null);
+        if (show)
+        {
+            chromaKeyPanelController.Show();
+            BringPopupToFront(chromaKeyMenu);
+            Canvas.ForceUpdateCanvases();
+            PositionPopupAboveButton(chromaKeyMenu, transparentBtn);
+            Canvas.ForceUpdateCanvases();
+        }
+        else
+        {
+            chromaKeyPanelController.Hide();
+        }
+
+        RegisterUiTreeNodes();
+    }
+
+    private void EnsureChromaKeyMenuController()
+    {
+        if (transparentBtn == null)
+            return;
+
+        EnsurePassthroughModeService();
+        if (playbackService == null)
+            playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        bool created = false;
+        if (chromaKeyMenu == null)
+        {
+            Transform parent = controlPanel != null && controlPanel.transform.parent != null
+                ? controlPanel.transform.parent
+                : transparentBtn.transform.parent;
+            chromaKeyMenu = new GameObject(
+                "ChromaKeyMenu",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(LayoutElement));
+            chromaKeyMenu.transform.SetParent(parent, false);
+            LayoutElement layout = chromaKeyMenu.GetComponent<LayoutElement>();
+            layout.ignoreLayout = true;
+            RectTransform rect = chromaKeyMenu.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.zero;
+            rect.pivot = Vector2.zero;
+            created = true;
+        }
+
+        chromaKeyPanelController = chromaKeyMenu.GetComponent<ChromaKeyPanelController>();
+        if (chromaKeyPanelController == null)
+            chromaKeyPanelController = chromaKeyMenu.AddComponent<ChromaKeyPanelController>();
+        chromaKeyPanelController.Bind(
+            playbackService,
+            passthroughModeService,
+            seeThroughBtn,
+            chromaKeyTogglePrefab,
+            chromaKeySliderPrefab);
+        chromaKeyPanelController.SetProgressSliderStyle(progressSlider);
+        if (created)
+            chromaKeyMenu.SetActive(false);
+    }
+
+    private void HandleChromaKeySettingsChanged(XRVLC.ChromaKeySettings settings)
+    {
+        UpdateTransparentButtonVisual();
+        UpdateSeeThroughButtonPassthroughVisual();
+    }
+
+    private void UpdateTransparentButtonVisual()
+    {
+        if (transparentBtn == null)
+            return;
+        bool enabled = playbackService != null && playbackService.CurrentChromaKeySettings.Enabled;
+        ApplyRuntimeButtonTheme(transparentBtn, transparentBtn.GetComponent<Image>(), enabled);
     }
 
     /// <summary>
@@ -1583,7 +1709,7 @@ public class VRUIManager : MonoBehaviour
         layoutElement.ignoreLayout = true;
 
         var rect = menu.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(600f, geometryMenuFlatHeight);
+        rect.sizeDelta = new Vector2(GeometryMenuWidth, geometryMenuFlatHeight);
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = Vector2.zero;
         rect.pivot = Vector2.zero;
@@ -1607,6 +1733,14 @@ public class VRUIManager : MonoBehaviour
         _projectionFlatButton = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjectionFlat), () => SetGeometryProjection(XRVLC.VideoProjection.Flat));
         _projection180Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection180), () => SetGeometryProjection(XRVLC.VideoProjection.Sphere180));
         _projection360Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection360), () => SetGeometryProjection(XRVLC.VideoProjection.Sphere360));
+        _projectionFisheyeButton = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjectionFisheye), () => SetGeometryProjection(XRVLC.VideoProjection.Fisheye180));
+
+        _fisheyeFormulaSectionLabel = CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryFisheyeFormula)).gameObject;
+        _fisheyeFormulaRow = CreateGeometryRow(menu.transform, "FisheyeFormulaRow");
+        _fisheyeEquidistantButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeEquidistant), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.Equidistant));
+        _fisheyeEquisolidButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeEquisolid), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.EquisolidAngle));
+        _fisheyeStereographicButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeStereographic), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.Stereographic));
+        _fisheyeOrthographicButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeOrthographic), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.Orthographic));
 
         CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo));
         Transform stereoRow = CreateGeometryRow(menu.transform, "StereoRow");
@@ -1706,6 +1840,15 @@ public class VRUIManager : MonoBehaviour
         UpdateGeometrySelectionHighlights();
     }
 
+    private void SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula formula)
+    {
+        _fisheyeProjectionFormula = formula;
+        if (playbackService == null)
+            playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        playbackService?.SetFisheyeProjectionFormula(formula);
+        UpdateGeometrySelectionHighlights();
+    }
+
     private void SetFlatCurveMode(XRVLC.FlatVideoCurveMode curveMode)
     {
         _flatCurveMode = curveMode;
@@ -1718,7 +1861,13 @@ public class VRUIManager : MonoBehaviour
     {
         SetGeometryOptionSelected(_projection180Button, _geometryProjection == XRVLC.VideoProjection.Sphere180);
         SetGeometryOptionSelected(_projection360Button, _geometryProjection == XRVLC.VideoProjection.Sphere360);
+        SetGeometryOptionSelected(_projectionFisheyeButton, _geometryProjection == XRVLC.VideoProjection.Fisheye180);
         SetGeometryOptionSelected(_projectionFlatButton, _geometryProjection == XRVLC.VideoProjection.Flat);
+
+        SetGeometryOptionSelected(_fisheyeEquidistantButton, _fisheyeProjectionFormula == XRVLC.FisheyeProjectionFormula.Equidistant);
+        SetGeometryOptionSelected(_fisheyeEquisolidButton, _fisheyeProjectionFormula == XRVLC.FisheyeProjectionFormula.EquisolidAngle);
+        SetGeometryOptionSelected(_fisheyeStereographicButton, _fisheyeProjectionFormula == XRVLC.FisheyeProjectionFormula.Stereographic);
+        SetGeometryOptionSelected(_fisheyeOrthographicButton, _fisheyeProjectionFormula == XRVLC.FisheyeProjectionFormula.Orthographic);
 
         SetGeometryOptionSelected(_stereoMonoButton, _geometryStereo == XRVLC.StereoMode.Mono);
         SetGeometryOptionSelected(_stereoTopBottomButton, _geometryStereo == XRVLC.StereoMode.TopBottom);
@@ -1733,16 +1882,23 @@ public class VRUIManager : MonoBehaviour
     private void UpdateGeometryCascadeVisibility()
     {
         bool showFlatCurveOptions = _geometryProjection == XRVLC.VideoProjection.Flat;
+        bool showFisheyeFormulaOptions = _geometryProjection == XRVLC.VideoProjection.Fisheye180;
 
         if (_curveSectionLabel != null)
             _curveSectionLabel.SetActive(showFlatCurveOptions);
         if (_curveRow != null)
             _curveRow.gameObject.SetActive(showFlatCurveOptions);
+        if (_fisheyeFormulaSectionLabel != null)
+            _fisheyeFormulaSectionLabel.SetActive(showFisheyeFormulaOptions);
+        if (_fisheyeFormulaRow != null)
+            _fisheyeFormulaRow.gameObject.SetActive(showFisheyeFormulaOptions);
 
         RectTransform rect = geometryMenu != null ? geometryMenu.GetComponent<RectTransform>() : null;
         if (rect != null)
         {
-            float height = showFlatCurveOptions ? geometryMenuFlatHeight : geometryMenuPanoramicHeight;
+            float height = showFlatCurveOptions || showFisheyeFormulaOptions
+                ? geometryMenuFlatHeight
+                : geometryMenuPanoramicHeight;
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
             rect.sizeDelta = new Vector2(rect.sizeDelta.x, height);
         }
@@ -1838,6 +1994,7 @@ public class VRUIManager : MonoBehaviour
         }
 
         _geometryStereo = selection.Stereo;
+        _fisheyeProjectionFormula = selection.FisheyeProjectionFormula;
         UpdateGeometrySelectionHighlights();
     }
 
@@ -1862,6 +2019,7 @@ public class VRUIManager : MonoBehaviour
         if (settingsMenu != except)
             HideSettingsMenu();
         SetActiveIfNotExcept(geometryMenu, except, false);
+        SetActiveIfNotExcept(chromaKeyMenu, except, false);
         if (systemSliderPopup != except)
             HideSystemSlider();
 
@@ -2301,6 +2459,7 @@ public class VRUIManager : MonoBehaviour
         SetButtonIcon(subtitleBtn, "subtitle", 32f);
         SetButtonIcon(seeThroughBtn, "sphere", 32f);
         SetButtonIcon(threeDBtn, "vr-glasses", 32f);
+        SetButtonIcon(transparentBtn, "eyes", 32f);
         SetButtonIcon(settingsBtn, "setting-two", 32f);
     }
 
@@ -2340,7 +2499,7 @@ public class VRUIManager : MonoBehaviour
 
     private static void ConfigureTextEdgeClarity(TextMeshProUGUI text)
     {
-        if (text == null)
+        if (text == null || text.fontSharedMaterial == null)
             return;
 
         Material material = text.fontMaterial;
@@ -2530,6 +2689,7 @@ public class VRUIManager : MonoBehaviour
 
         if (progressHoverTimeBubble != null)
             progressHoverTimeBubble.SetDuration(totalTimeMs);
+
     }
 
     private string FormatTime(long ms)

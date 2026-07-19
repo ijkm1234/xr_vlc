@@ -195,7 +195,16 @@ public static class VlcPlaybackPayloadParser
     /// </summary>
     public static VlcMediaParseResult ParseMediaParseResult(string json)
     {
-        return JsonUtility.FromJson<VlcMediaParseResult>(json);
+        VlcMediaParseResult result = JsonUtility.FromJson<VlcMediaParseResult>(json);
+        if (result != null)
+            result.SetMediaRequestId(JsonUtility.FromJson<MediaParseRequestMetadata>(json)?.mediaRequestId ?? 0L);
+        return result;
+    }
+
+    [Serializable]
+    private sealed class MediaParseRequestMetadata
+    {
+        public long mediaRequestId;
     }
 
     private static MediaProjectionType ParseProjectionType(string value) => value switch

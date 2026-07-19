@@ -5,6 +5,7 @@ namespace XRVLC
         Flat,
         Cylinder,
         Sphere360,
-        Sphere180
+        Sphere180,
+        Fisheye180
     }
 }

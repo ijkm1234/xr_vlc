@@ -32,7 +32,7 @@ namespace XRVLC
         /// <summary>
         /// 根据当前媒体信息重建视频层几何。VLC 绑定由 PlaybackService 统一协调。
         /// </summary>
-        public void Rebuild(VlcVideoSize videoSize)
+        public void Rebuild(VlcVideoSize videoSize, bool useTextureAlphaBlending)
         {
             if (_videoScreen == null)
                 return;
@@ -44,7 +44,7 @@ namespace XRVLC
             uint contentWidth = (uint)videoSize.ContentWidth;
             uint contentHeight = (uint)videoSize.ContentHeight;
 
-            _videoScreen.RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, contentWidth, contentHeight, geometry.Projection, geometry.Stereo, geometry.CurveMode);
+            _videoScreen.RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, contentWidth, contentHeight, geometry.Projection, geometry.Stereo, geometry.CurveMode, useTextureAlphaBlending);
             _videoScreen.SetGeometry(geometry.Projection, geometry.Stereo, geometry.CurveMode);
             // Seed the new media size before SetVideoLayout refits cached dimensions.
             _videoScreen.FitVideoSize(contentWidth, contentHeight);

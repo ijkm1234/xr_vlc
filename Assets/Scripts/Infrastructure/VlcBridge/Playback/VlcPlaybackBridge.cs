@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
+using XRVLC;
 using XRVLC.Media;
 
 /// <summary>
@@ -14,7 +15,6 @@ public class VlcPlaybackBridge : MonoBehaviour
     private const string BridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
     private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
     private static VlcPlaybackBridge _instance;
-    public static VlcPlaybackSnapshot Snapshot { get; } = new VlcPlaybackSnapshot();
 
     // --- 事件回调 ---
     public static event Action<VlcVideoSize> OnVideoSizeChangedEvent;
@@ -24,6 +24,8 @@ public class VlcPlaybackBridge : MonoBehaviour
     public static event Action<long> OnLengthChangedEvent;
     public static event Action<float> OnPlaybackRateChangedEvent;
     public static event Action<float> OnBufferingEvent;
+    public static event Action<string> OnChromaKeyColorExtractedEvent;
+    public static event Action<string> OnVideoOutputSwitchEventReceived;
     public static event Action ClearPlaybackSurfaceEvent;
     
     // 轨道回调事件：List<TrackInfo>
@@ -72,7 +74,6 @@ public class VlcPlaybackBridge : MonoBehaviour
         if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
             rate = 1f;
 
-        Snapshot.PlaybackRate = rate;
         OnPlaybackRateChangedEvent?.Invoke(rate);
     }
 
@@ -80,7 +81,7 @@ public class VlcPlaybackBridge : MonoBehaviour
     // 1. 调用 Android AAR 侧的方法 (JNI)
     // ==========================================
 
-    public static void PreloadLocation(string payload)
+    public static long PreloadLocation(string payload)
     {
         bool payloadIsJson = payload != null && payload.TrimStart().StartsWith("{", StringComparison.Ordinal);
         SurfaceDebug(
@@ -92,18 +93,21 @@ public class VlcPlaybackBridge : MonoBehaviour
         {
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
             {
-                bridge.CallStatic("preloadLocation", payload);
+                long mediaRequestId = bridge.CallStatic<long>("preloadLocation", payload);
                 Debug.Log($"[VlcPlaybackBridge] PreloadLocation called for: {payload}");
-                SurfaceDebug("preload_location android_call_returned");
+                SurfaceDebug($"preload_location android_call_returned request={mediaRequestId}");
+                return mediaRequestId;
             }
         }
         catch (System.Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] PreloadLocation failed: {e.Message}");
             SurfaceDebug($"preload_location failed exception={e}");
+            return 0L;
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] PreloadLocation is only supported on Android devices.");
+        return 0L;
 #endif
     }
 
@@ -178,6 +182,189 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] DetachSurface is only supported on Android device.");
+#endif
+    }
+
+    public static void BeginVideoOutputDetach(long switchToken)
+    {
+        SurfaceDebug($"video_output_switch begin_detach token={switchToken}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("beginVideoOutputDetach", switchToken);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] BeginVideoOutputDetach failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|begin-detach-jni");
+        }
+#else
+        OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|detached");
+#endif
+    }
+
+    public static void AttachVideoOutput(
+        long switchToken,
+        long mediaRequestId,
+        IntPtr surfacePtr,
+        bool fisheyeMappingEnabled,
+        bool chromaKeyEnabled,
+        StereoMode stereo,
+        uint contentWidth,
+        uint contentHeight)
+    {
+        SurfaceDebug(
+            $"video_output_switch attach token={switchToken} mediaRequest={mediaRequestId} surface={surfacePtr} " +
+            $"fisheye={fisheyeMappingEnabled} chroma={chromaKeyEnabled} stereo={stereo} " +
+            $"content={contentWidth}x{contentHeight}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            int attachResult = AndroidJNI.AttachCurrentThread();
+            if (attachResult != 0)
+                throw new InvalidOperationException($"AttachCurrentThread returned {attachResult}");
+
+            IntPtr bridgeClass = AndroidJNI.FindClass("org/videolan/vlc/bridge/PlaybackServiceBridge");
+            if (bridgeClass == IntPtr.Zero)
+                throw new InvalidOperationException("PlaybackServiceBridge class not found");
+
+            IntPtr attachMethod = AndroidJNI.GetStaticMethodID(
+                bridgeClass,
+                "attachVideoOutput",
+                "(JJLandroid/view/Surface;ZZIII)V");
+            if (attachMethod == IntPtr.Zero)
+                throw new InvalidOperationException("attachVideoOutput method not found");
+
+            jvalue[] args = new jvalue[8];
+            args[0].j = switchToken;
+            args[1].j = mediaRequestId;
+            args[2].l = surfacePtr;
+            args[3].z = fisheyeMappingEnabled;
+            args[4].z = chromaKeyEnabled;
+            args[5].i = (int)stereo;
+            args[6].i = (int)contentWidth;
+            args[7].i = (int)contentHeight;
+            AndroidJNI.CallStaticVoidMethod(bridgeClass, attachMethod, args);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] AttachVideoOutput failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|attach-jni");
+        }
+#else
+        OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|ready");
+#endif
+    }
+
+    public static void CancelVideoOutputSwitch(long switchToken)
+    {
+        SurfaceDebug($"video_output_switch cancel token={switchToken}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("cancelVideoOutputSwitch", switchToken);
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[VlcPlaybackBridge] CancelVideoOutputSwitch failed: {e.Message}");
+        }
+#endif
+    }
+
+    public static void SetVideoSurfaceMapping(bool fisheyeMappingEnabled, bool chromaKeyEnabled, StereoMode stereo, uint contentWidth, uint contentHeight)
+    {
+        SurfaceDebug(
+            $"set_video_surface_mapping enter fisheye={fisheyeMappingEnabled} chromaKey={chromaKeyEnabled} " +
+            $"stereo={stereo} content={contentWidth}x{contentHeight}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setVideoSurfaceMapping", fisheyeMappingEnabled, chromaKeyEnabled, (int)stereo, (int)contentWidth, (int)contentHeight);
+                SurfaceDebug(
+                    $"set_video_surface_mapping android_call_returned fisheye={fisheyeMappingEnabled} chromaKey={chromaKeyEnabled} " +
+                    $"stereo={(int)stereo} content={contentWidth}x{contentHeight}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetVideoSurfaceMapping failed: {e.Message}");
+            SurfaceDebug($"set_video_surface_mapping exception={e}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetVideoSurfaceMapping is only supported on Android device.");
+#endif
+    }
+
+    public static void SetVideoSurfaceProcessingParameters(
+        FisheyeProjectionFormula fisheyeProjectionFormula,
+        Color keyColor,
+        float colorRange,
+        float falloff,
+        bool edgeSmoothEnabled,
+        bool clipBlackEnabled,
+        bool clipWhiteEnabled,
+        bool despillEnabled)
+    {
+        Color rgb = new Color(
+            Mathf.Clamp01(keyColor.r),
+            Mathf.Clamp01(keyColor.g),
+            Mathf.Clamp01(keyColor.b),
+            1f);
+        float range = Mathf.Clamp01(colorRange);
+        float safeFalloff = Mathf.Clamp01(falloff);
+        SurfaceDebug(
+            $"set_video_surface_processing formula={fisheyeProjectionFormula} " +
+            $"key=({rgb.r:F4},{rgb.g:F4},{rgb.b:F4}) range={range:F4} falloff={safeFalloff:F4} " +
+            $"edgeSmooth={edgeSmoothEnabled} clipBlack={clipBlackEnabled} " +
+            $"clipWhite={clipWhiteEnabled} despill={despillEnabled}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic(
+                    "setVideoSurfaceProcessingParameters",
+                    (int)fisheyeProjectionFormula,
+                    rgb.r,
+                    rgb.g,
+                    rgb.b,
+                    range,
+                    safeFalloff,
+                    edgeSmoothEnabled,
+                    clipBlackEnabled,
+                    clipWhiteEnabled,
+                    despillEnabled);
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetVideoSurfaceProcessingParameters failed: {e.Message}");
+            SurfaceDebug($"set_video_surface_processing exception={e}");
+        }
+#endif
+    }
+
+    public static void RequestVideoSurfaceChromaKeyColorExtraction()
+    {
+        SurfaceDebug("request_chroma_key_color_extraction enter");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("requestVideoSurfaceChromaKeyColorExtraction");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] RequestVideoSurfaceChromaKeyColorExtraction failed: {e.Message}");
+            OnChromaKeyColorExtractedEvent?.Invoke("error|jni-exception");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] Chroma key color extraction is only supported on Android device.");
+        OnChromaKeyColorExtractedEvent?.Invoke("error|unsupported-platform");
 #endif
     }
 
@@ -302,6 +489,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void Play()
     {
+        SurfaceDebug("control_play enter");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -309,19 +497,112 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("play");
                 Debug.Log("[VlcPlaybackBridge] Play called");
+                SurfaceDebug("control_play android_call_returned");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] Play failed: {e.Message}");
+            SurfaceDebug($"control_play exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] Play is only supported on Android device.");
+        SurfaceDebug("control_play unsupported_platform");
 #endif
+    }
+
+    public static void ReplayFromStart()
+    {
+        SurfaceDebug("control_replay_from_start enter");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("replayFromStart");
+                SurfaceDebug("control_replay_from_start android_call_returned");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] ReplayFromStart failed: {e.Message}");
+            SurfaceDebug($"control_replay_from_start exception={e}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] ReplayFromStart is only supported on Android device.");
+        SurfaceDebug("control_replay_from_start unsupported_platform");
+#endif
+    }
+
+    public static bool IsPlaying()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<bool>("isPlaying");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] IsPlaying failed: {e.Message}");
+            return false;
+        }
+#else
+        return false;
+#endif
+    }
+
+    public static int GetPlayerState()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<int>("getPlayerState");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetPlayerState failed: {e.Message}");
+        }
+#endif
+        return -1;
+    }
+
+    public static long GetTime()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<long>("getTime");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetTime failed: {e.Message}");
+        }
+#endif
+        return 0L;
+    }
+
+    public static long GetLength()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<long>("getLength");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetLength failed: {e.Message}");
+        }
+#endif
+        return 0L;
     }
 
     public static void Pause()
     {
+        SurfaceDebug("control_pause enter");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -329,19 +610,23 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("pause");
                 Debug.Log("[VlcPlaybackBridge] Pause called");
+                SurfaceDebug("control_pause android_call_returned");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] Pause failed: {e.Message}");
+            SurfaceDebug($"control_pause exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] Pause is only supported on Android device.");
+        SurfaceDebug("control_pause unsupported_platform");
 #endif
     }
 
     public static void Stop()
     {
+        SurfaceDebug("control_stop enter");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -349,14 +634,17 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("stop");
                 Debug.Log("[VlcPlaybackBridge] Stop called");
+                SurfaceDebug("control_stop android_call_returned");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] Stop failed: {e.Message}");
+            SurfaceDebug($"control_stop exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] Stop is only supported on Android device.");
+        SurfaceDebug("control_stop unsupported_platform");
 #endif
     }
 
@@ -442,6 +730,7 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     public static void Seek(float position)
     {
+        SurfaceDebug($"control_seek enter position={position.ToString(CultureInfo.InvariantCulture)}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -449,19 +738,23 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("seek", position);
                 Debug.Log($"[VlcPlaybackBridge] Seek called with position: {position}");
+                SurfaceDebug($"control_seek android_call_returned position={position.ToString(CultureInfo.InvariantCulture)}");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] Seek failed: {e.Message}");
+            SurfaceDebug($"control_seek exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] Seek is only supported on Android device.");
+        SurfaceDebug("control_seek unsupported_platform");
 #endif
     }
     
     public static void SetTime(long timeMs)
     {
+        SurfaceDebug($"control_set_time enter timeMs={timeMs}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -469,14 +762,17 @@ public class VlcPlaybackBridge : MonoBehaviour
             {
                 bridge.CallStatic("setTime", timeMs);
                 Debug.Log($"[VlcPlaybackBridge] SetTime called with time: {timeMs}");
+                SurfaceDebug($"control_set_time android_call_returned timeMs={timeMs}");
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] SetTime failed: {e.Message}");
+            SurfaceDebug($"control_set_time exception={e}");
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetTime is only supported on Android device.");
+        SurfaceDebug("control_set_time unsupported_platform");
 #endif
     }
 
@@ -862,18 +1158,20 @@ public class VlcPlaybackBridge : MonoBehaviour
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
             {
                 float rate = bridge.CallStatic<float>("getRate");
+                if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
+                    rate = 1f;
                 PublishPlaybackRate(rate);
                 Debug.Log($"[VlcPlaybackBridge] GetPlaybackRate returned: {rate}");
-                return Snapshot.PlaybackRate;
+                return rate;
             }
         }
         catch (Exception e)
         {
             Debug.LogError($"[VlcPlaybackBridge] GetPlaybackRate failed: {e.Message}");
-            return Snapshot.PlaybackRate;
+            return 1f;
         }
 #else
-        return Snapshot.PlaybackRate;
+        return 1f;
 #endif
     }
 
@@ -956,10 +1254,21 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
     }
 
+    public void OnVideoOutputSwitchEvent(string payload)
+    {
+        SurfaceDebug($"video_output_switch unity_event payload={payload}");
+        OnVideoOutputSwitchEventReceived?.Invoke(payload ?? string.Empty);
+    }
+
+    public void OnChromaKeyColorExtracted(string payload)
+    {
+        SurfaceDebug($"chroma_key_color_extracted payload={payload}");
+        OnChromaKeyColorExtractedEvent?.Invoke(payload ?? string.Empty);
+    }
+
     public void OnStateChanged(string state)
     {
         Debug.Log($"[VlcPlaybackBridge] OnStateChanged: {state}");
-        Snapshot.SetStatusFromBridge(state);
         OnStateChangedEvent?.Invoke(state);
     }
 
@@ -967,7 +1276,6 @@ public class VlcPlaybackBridge : MonoBehaviour
     {
         if (long.TryParse(timeStr, out long timeMs))
         {
-            Snapshot.TimeMs = timeMs;
             OnTimeChangedEvent?.Invoke(timeMs);
         }
     }
@@ -985,7 +1293,6 @@ public class VlcPlaybackBridge : MonoBehaviour
         Debug.Log($"[VlcPlaybackBridge] OnLengthChanged: {lengthStr}");
         if (long.TryParse(lengthStr, out long lengthMs))
         {
-            Snapshot.LengthMs = lengthMs;
             OnLengthChangedEvent?.Invoke(lengthMs);
         }
     }
@@ -1007,7 +1314,6 @@ public class VlcPlaybackBridge : MonoBehaviour
     {
         if (float.TryParse(bufferStr, out float buffering))
         {
-            Snapshot.Buffering = buffering;
             OnBufferingEvent?.Invoke(buffering);
         }
     }
@@ -1046,7 +1352,6 @@ public class VlcPlaybackBridge : MonoBehaviour
             if (mediaWrapper == null) return;
 
             XRVLC.Media.VlcMediaLibraryBridge.AddToHistory(mediaWrapper.Uri, mediaWrapper.Title);
-            Snapshot.CurrentMedia = mediaWrapper;
             SurfaceDebug($"start_play parsed uri={XRVLC.Utils.UriUtils.RedactUri(mediaWrapper.Uri)} title={mediaWrapper.Title}");
             OnPlayRequestedEvent?.Invoke(mediaWrapper);
         }

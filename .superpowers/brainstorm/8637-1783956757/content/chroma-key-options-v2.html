@@ -1,0 +1,133 @@
+<div id="chroma-options">
+  <h2>选择绿幕边缘处理</h2>
+  <p class="subtitle">同一视频帧，棋盘表示透明区域。点击最符合预期的版本。</p>
+
+  <div class="cards">
+    <div class="card" data-choice="current" onclick="toggleSelect(this)">
+      <div class="card-image key-preview">
+        <canvas id="preview-current" width="640" height="360" aria-label="当前绿幕参数预览"></canvas>
+      </div>
+      <div class="card-body">
+        <h3>A 当前参数</h3>
+        <p>Inner 0.020 / Outer 0.100，不去绿。边缘最完整，但绿色溢色明显。</p>
+      </div>
+    </div>
+
+    <div class="card" data-choice="balanced" onclick="toggleSelect(this)">
+      <div class="card-image key-preview">
+        <canvas id="preview-balanced" width="640" height="360" aria-label="平衡去绿预览"></canvas>
+      </div>
+      <div class="card-body">
+        <h3>B 平衡去绿（推荐）</h3>
+        <p>Inner 0.020 / Outer 0.120，按透明度衰减绿色溢出，保留头发和衣物边缘。</p>
+      </div>
+    </div>
+
+    <div class="card" data-choice="aggressive" onclick="toggleSelect(this)">
+      <div class="card-image key-preview">
+        <canvas id="preview-aggressive" width="640" height="360" aria-label="激进去绿预览"></canvas>
+      </div>
+      <div class="card-body">
+        <h3>C 激进抠除</h3>
+        <p>Inner 0.025 / Outer 0.150，完全去绿。轮廓更干净，但可能侵蚀头发和肤色边缘。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  #chroma-options .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #chroma-options .key-preview {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--muted);
+    background-image:
+      linear-gradient(45deg, color-mix(in srgb, var(--foreground) 12%, transparent) 25%, transparent 25%),
+      linear-gradient(-45deg, color-mix(in srgb, var(--foreground) 12%, transparent) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--foreground) 12%, transparent) 75%),
+      linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--foreground) 12%, transparent) 75%);
+    background-size: 24px 24px;
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  }
+
+  #chroma-options canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  @media (max-width: 720px) {
+    #chroma-options .cards {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  (() => {
+    const root = document.getElementById('chroma-options');
+    const keyCb = -0.043978;
+    const keyCr = -0.248586;
+
+    const smoothstep = (edge0, edge1, value) => {
+      const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    };
+
+    const variants = [
+      { id: 'preview-current', inner: 0.020, outer: 0.100, despill: 0 },
+      { id: 'preview-balanced', inner: 0.020, outer: 0.120, despill: 0.85 },
+      { id: 'preview-aggressive', inner: 0.025, outer: 0.150, despill: 1.0 }
+    ];
+
+    const image = new Image();
+    image.onload = () => {
+      const source = document.createElement('canvas');
+      source.width = image.naturalWidth;
+      source.height = image.naturalHeight;
+      const sourceContext = source.getContext('2d', { willReadFrequently: true });
+      sourceContext.drawImage(image, 0, 0);
+      const sourcePixels = sourceContext.getImageData(0, 0, source.width, source.height);
+
+      variants.forEach((variant) => {
+        const canvas = root.querySelector(`#${variant.id}`);
+        const context = canvas.getContext('2d');
+        const output = new ImageData(new Uint8ClampedArray(sourcePixels.data), source.width, source.height);
+
+        for (let offset = 0; offset < output.data.length; offset += 4) {
+          let red = output.data[offset] / 255;
+          let green = output.data[offset + 1] / 255;
+          let blue = output.data[offset + 2] / 255;
+          const cb = -0.168736 * red - 0.331264 * green + 0.5 * blue;
+          const cr = 0.5 * red - 0.418688 * green - 0.081312 * blue;
+          const distance = Math.hypot(cb - keyCb, cr - keyCr);
+          const alpha = smoothstep(variant.inner, variant.outer, distance);
+
+          if (variant.despill > 0) {
+            const greenExcess = Math.max(green - Math.max(red, blue), 0);
+            green -= greenExcess * (1 - alpha) * variant.despill;
+          }
+
+          output.data[offset] = Math.round(red * 255);
+          output.data[offset + 1] = Math.round(green * 255);
+          output.data[offset + 2] = Math.round(blue * 255);
+          output.data[offset + 3] = Math.round(alpha * 255);
+        }
+
+        context.putImageData(output, 0, 0);
+      });
+    };
+    image.onerror = () => {
+      root.querySelectorAll('.key-preview').forEach((preview) => {
+        preview.textContent = '测试帧加载失败';
+        preview.style.display = 'grid';
+        preview.style.placeItems = 'center';
+        preview.style.minHeight = '180px';
+      });
+    };
+    image.src = '/files/transparent-frame.png';
+  })();
+</script>

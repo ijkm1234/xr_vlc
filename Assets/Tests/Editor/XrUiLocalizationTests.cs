@@ -38,6 +38,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("key,en-US,zh-Hans,zh-Hant", csv);
             StringAssert.Contains("track.subtitle.choose_other,Choose another subtitle,选择其他字幕,", csv);
             StringAssert.Contains("settings.gesture.info_tooltip", csv);
+            StringAssert.Contains("geometry.projection.fisheye,Fisheye 180,鱼眼180,", csv);
             StringAssert.Contains("geometry.curve.large,Large curve,大曲面,", csv);
         }
 

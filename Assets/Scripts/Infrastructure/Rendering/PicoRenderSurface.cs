@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using UnityEngine;
 using Unity.XR.PXR;
 
@@ -41,7 +42,8 @@ namespace XRVLC
 
         public void RebuildLayer(bool asHardwareSurface, uint videoWidth = 0, uint videoHeight = 0,
                                  VideoProjection proj = VideoProjection.Flat, StereoMode stereo = StereoMode.Mono,
-                                 FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
+                                 FlatVideoCurveMode curveMode = FlatVideoCurveMode.None,
+                                 bool useTextureAlphaBlending = false)
         {
             if (_compLayer == null)
             {
@@ -50,7 +52,8 @@ namespace XRVLC
             }
             SurfaceDebug(
                 $"rebuild_layer start asHardwareSurface={asHardwareSurface} requested={videoWidth}x{videoHeight} " +
-                $"projection={proj} stereo={stereo} curve={curveMode} previousHandle={_hardwareSurfaceHandle} " +
+                $"projection={proj} stereo={stereo} curve={curveMode} alphaBlending={useTextureAlphaBlending} " +
+                $"previousHandle={_hardwareSurfaceHandle} " +
                 $"previousExternal={_compLayer.externalAndroidSurfaceObject} enabled={_compLayer.enabled}");
             BindCompositionLayerPose();
 
@@ -69,12 +72,12 @@ namespace XRVLC
             _compLayer.isDynamic = false;
 
             // ── 必须在 InitializeBuffer() 之前设置，否则 layerShape/layerLayout/overlayType 固化为默认值 ──
-            bool isImmersive = proj is VideoProjection.Sphere360 or VideoProjection.Sphere180;
+            bool isImmersive = proj is VideoProjection.Sphere360 or VideoProjection.Sphere180 or VideoProjection.Fisheye180;
 
             _compLayer.overlayShape = proj switch
             {
                 VideoProjection.Cylinder => PXR_CompositionLayer.OverlayShape.Cylinder,
-                VideoProjection.Sphere360 or VideoProjection.Sphere180 => PXR_CompositionLayer.OverlayShape.Equirect,
+                VideoProjection.Sphere360 or VideoProjection.Sphere180 or VideoProjection.Fisheye180 => PXR_CompositionLayer.OverlayShape.Equirect,
                 _ => PXR_CompositionLayer.OverlayShape.Quad
             };
             _compLayer.externalAndroidSurface3DType = stereo switch
@@ -86,11 +89,14 @@ namespace XRVLC
             // 统一使用 Underlay：视频在 eye buffer 之下，字幕/UI/手柄由 Unity 正常覆盖。
             _compLayer.overlayType = PXR_CompositionLayer.OverlayType.Underlay;
             _compLayer.layerDepth = 0;
+            _compLayer.useTextureAlphaBlending = useTextureAlphaBlending;
+            _compLayer.usePremultipliedAlpha = false;
 
             Debug.Log($"[PicoRenderSurface] RebuildLayer — proj={proj}, isImmersive={isImmersive}, overlayType={_compLayer.overlayType}, shape={_compLayer.overlayShape}");
             SurfaceDebug(
                 $"rebuild_layer configured shape={_compLayer.overlayShape} type={_compLayer.overlayType} " +
-                $"surface3D={_compLayer.externalAndroidSurface3DType}");
+                $"surface3D={_compLayer.externalAndroidSurface3DType} alphaBlending={_compLayer.useTextureAlphaBlending} " +
+                $"premultipliedAlpha={_compLayer.usePremultipliedAlpha}");
 
             ApplyProjectionRadius(proj, curveMode);
 
@@ -112,7 +118,10 @@ namespace XRVLC
             // 层在此处创建，shape 和 layerLayout 在此固化
             SurfaceDebug("rebuild_layer before_initialize_buffer");
             _compLayer.InitializeBuffer();
-            SurfaceDebug($"rebuild_layer after_initialize_buffer external={_compLayer.externalAndroidSurfaceObject}");
+            SurfaceDebug(
+                $"rebuild_layer after_initialize_buffer external={_compLayer.externalAndroidSurfaceObject} " +
+                $"compositionColorFormat={DescribeCompositionLayerColorFormat(_compLayer)} " +
+                $"graphicsDevice={SystemInfo.graphicsDeviceType} colorSpace={QualitySettings.activeColorSpace}");
 
             // 重置 UV 截取矩阵
             _compLayer.useImageRect = false;
@@ -132,6 +141,35 @@ namespace XRVLC
             SurfaceDebug(
                 $"rebuild_layer complete enabled={_compLayer.enabled} external={_compLayer.externalAndroidSurfaceObject} " +
                 $"ready={IsHardwareSurfaceReady()} handle={_hardwareSurfaceHandle}");
+        }
+
+        private static string DescribeCompositionLayerColorFormat(PXR_CompositionLayer layer)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            try
+            {
+                FieldInfo overlayParamField = layer.GetType().GetField("overlayParam", flags);
+                object overlayParam = overlayParamField?.GetValue(layer);
+                FieldInfo formatField = overlayParam?.GetType().GetField("format", flags);
+                object rawFormat = formatField?.GetValue(overlayParam);
+                if (rawFormat == null)
+                    return "unavailable";
+
+                ulong format = Convert.ToUInt64(rawFormat);
+                string formatName = format switch
+                {
+                    37 => "VK_FORMAT_R8G8B8A8_UNORM",
+                    43 => "VK_FORMAT_R8G8B8A8_SRGB",
+                    0x8058 => "GL_RGBA8",
+                    0x8C43 => "GL_SRGB8_ALPHA8",
+                    _ => "unknown"
+                };
+                return $"{formatName}({format}/0x{format:X})";
+            }
+            catch (Exception exception)
+            {
+                return $"unavailable({exception.GetType().Name})";
+            }
         }
 
         public void SetGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
@@ -165,6 +203,7 @@ namespace XRVLC
                     _compLayer.dstRectRight = new Rect(0, 0, 1, 1);
                     break;
                 case VideoProjection.Sphere180:
+                case VideoProjection.Fisheye180:
                     _compLayer.overlayShape = PXR_CompositionLayer.OverlayShape.Equirect;
                     ApplyProjectionRadius(projection, curveMode);
                     // 180半球：水平 180度 (width=0.5)
@@ -218,7 +257,9 @@ namespace XRVLC
                 return;
             }
 
-            if (projection == VideoProjection.Sphere360 || projection == VideoProjection.Sphere180)
+            if (projection == VideoProjection.Sphere360 ||
+                projection == VideoProjection.Sphere180 ||
+                projection == VideoProjection.Fisheye180)
                 _compLayer.radius = ImmersiveSphereRadius;
         }
 

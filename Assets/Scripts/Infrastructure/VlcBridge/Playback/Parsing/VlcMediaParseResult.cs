@@ -3,6 +3,11 @@ using System;
 [Serializable]
 public class VlcMediaParseResult
 {
+    // Keep Unity's serialized field layout stable across a hot reload. The ID is
+    // parsed separately by VlcPlaybackPayloadParser and is runtime-only.
+    private long _mediaRequestId;
+    /// <summary>本次预加载请求的单调递增标识，用于过滤过期解析结果。</summary>
+    public long MediaRequestId => _mediaRequestId;
     /// <summary>解析结果所属媒体 URI。</summary>
     public string uri;
     /// <summary>解析出的原始视频宽度。</summary>
@@ -24,6 +29,11 @@ public class VlcMediaParseResult
     public VlcVideoSize ToVideoSize()
     {
         return new VlcVideoSize(width, height, visibleWidth, visibleHeight);
+    }
+
+    internal void SetMediaRequestId(long mediaRequestId)
+    {
+        _mediaRequestId = mediaRequestId;
     }
 }
 

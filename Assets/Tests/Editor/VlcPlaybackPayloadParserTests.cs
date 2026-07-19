@@ -601,6 +601,61 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void PlaybackControlChain_HasAdbVisibleDiagnostics()
+        {
+            string unityServiceSource = File.ReadAllText(ProjectFile("Assets/Scripts/Services/Playback/PlaybackService.cs"));
+            string playbackBridgeSource = File.ReadAllText(ProjectFile("Assets/Scripts/Infrastructure/VlcBridge/Playback/VlcPlaybackBridge.cs"));
+            string androidBridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
+            string androidServiceSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/PlaybackService.kt"));
+            string mediaSessionCallbackSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/MediaSessionCallback.kt"));
+            string playlistManagerSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt"));
+            string playerControllerSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlayerController.kt"));
+            string videoPlayerActivitySource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/gui/video/VideoPlayerActivity.kt"));
+
+            StringAssert.Contains("SurfaceDebug($\"control_play enter status={CurrentStatus}", unityServiceSource);
+            StringAssert.Contains("SurfaceDebug($\"control_toggle enter status={CurrentStatus}", unityServiceSource);
+            StringAssert.Contains("SurfaceDebug($\"control_seek_time enter target={timeMs}", unityServiceSource);
+            StringAssert.Contains("SurfaceDebug($\"control_seek_position enter position={position}", unityServiceSource);
+
+            StringAssert.Contains("SurfaceDebug(\"control_play enter\");", playbackBridgeSource);
+            StringAssert.Contains("SurfaceDebug(\"control_pause enter\");", playbackBridgeSource);
+            StringAssert.Contains("SurfaceDebug($\"control_seek enter position={position.ToString(CultureInfo.InvariantCulture)}\");", playbackBridgeSource);
+            StringAssert.Contains("SurfaceDebug($\"control_set_time enter timeMs={timeMs}\");", playbackBridgeSource);
+
+            StringAssert.Contains("surfaceDebug(\"control_play enter ${describePlaybackState(playbackService)}\")", androidBridgeSource);
+            StringAssert.Contains("surfaceDebug(\"control_seek enter requested=$position", androidBridgeSource);
+            StringAssert.Contains("surfaceDebug(\"control_set_time enter timeMs=$timeMs", androidBridgeSource);
+            StringAssert.Contains("surfaceDebug(\"event_time_changed time=${event.timeChanged}", androidBridgeSource);
+            StringAssert.Contains("private const val TIMELINE_TAG = \"XR_TIMELINE\"", androidBridgeSource);
+            StringAssert.Contains("timelineDebug(\"control_play enter", androidBridgeSource);
+            StringAssert.Contains("timelineDebug(\"event_${mediaPlayerEventName(event.type)}", androidBridgeSource);
+
+            StringAssert.Contains("Log.e(TAG, \"XR_CONTROL PlaybackService.play enter", androidServiceSource);
+            StringAssert.Contains("Log.e(TAG, \"XR_CONTROL PlaybackService.seek enter", androidServiceSource);
+            StringAssert.Contains("Log.e(TAG, \"XR_CONTROL PlaybackService.stop enter", androidServiceSource);
+            StringAssert.Contains("private const val TIMELINE_TAG = \"XR_TIMELINE\"", androidServiceSource);
+            StringAssert.Contains("timelineDebug(\"event_${mediaPlayerEventName(event.type)}", androidServiceSource);
+            StringAssert.Contains("timelineDebug(\"publish_state state=$state", androidServiceSource);
+            StringAssert.Contains("MediaSessionCallback.onPlay enter", mediaSessionCallbackSource);
+            StringAssert.Contains("MediaSessionCallback.onMediaButtonEvent enter", mediaSessionCallbackSource);
+            StringAssert.Contains("MediaSessionCallback.onPause enter", mediaSessionCallbackSource);
+            StringAssert.Contains("PlaylistManager.playIndex enter", playlistManagerSource);
+            StringAssert.Contains("PlaylistManager.pause enter", playlistManagerSource);
+            StringAssert.Contains("PlaylistManager.stop enter", playlistManagerSource);
+            StringAssert.Contains("android.util.Log.e(\"XR_CONTROL\", \"PlayerController.play enter", playerControllerSource);
+            StringAssert.Contains("android.util.Log.e(\"XR_CONTROL\", \"PlayerController.startPlayback enter", playerControllerSource);
+            StringAssert.Contains("android.util.Log.e(\"XR_SURFACE_DEBUG\", \"PlayerController.onSurfacesDestroyed before", playerControllerSource);
+            StringAssert.Contains("android.util.Log.e(\"XR_CONTROL\", \"PlayerController.event TimeChanged", playerControllerSource);
+            StringAssert.Contains("private const val TIMELINE_TAG = \"XR_TIMELINE\"", playerControllerSource);
+            StringAssert.Contains("timelineDebug(\"event_time_jump", playerControllerSource);
+            StringAssert.Contains("VideoPlayerActivity.loadMedia enter", videoPlayerActivitySource);
+            StringAssert.Contains("VideoPlayerActivity.loadMedia add MEDIA_PAUSED", videoPlayerActivitySource);
+            StringAssert.Contains("VideoPlayerActivity.stopPlayback computed", videoPlayerActivitySource);
+            StringAssert.Contains("VideoPlayerActivity.stopPlayback save VIDEO_PAUSED=true", videoPlayerActivitySource);
+            StringAssert.Contains("VideoPlayerActivity.onMediaPlayerEvent event=", videoPlayerActivitySource);
+        }
+
+        [Test]
         public void PlaylistManager_SavesExplicitSeekTimeAndClearsFinishedState()
         {
             string playlistManagerSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt"));
@@ -886,6 +941,114 @@ namespace XRVLC.Tests
 
             StringAssert.DoesNotContain("VlcPlaybackBridge.Stop()", clearMethod);
             StringAssert.DoesNotContain("StopInternal()", clearMethod);
+        }
+
+        [Test]
+        public void AndroidBridge_RoutesFisheyeAndChromaKeyThroughSurfaceMapper()
+        {
+            string bridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
+            string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
+            string playbackBridgeSource = File.ReadAllText(ProjectFile("Assets/Scripts/Infrastructure/VlcBridge/Playback/VlcPlaybackBridge.cs"));
+
+            StringAssert.Contains("fun setVideoSurfaceMapping(fisheyeMappingEnabled: Boolean, chromaKeyEnabled: Boolean, stereo: Int, contentWidth: Int, contentHeight: Int)", bridgeSource);
+            StringAssert.Contains("private var surfaceMapper: XrSurfaceMapper? = null", bridgeSource);
+            StringAssert.Contains("fisheyeMappingEnabled || chromaKeyEnabled", bridgeSource);
+            int configureStart = bridgeSource.IndexOf("mapper.configure(", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(configureStart, 0);
+            int configureEnd = bridgeSource.IndexOf(')', configureStart);
+            Assert.Greater(configureEnd, configureStart);
+            string configureCall = bridgeSource.Substring(configureStart, configureEnd - configureStart);
+            StringAssert.Contains("videoSurfaceFisheyeMappingEnabled", configureCall);
+            StringAssert.Contains("videoSurfaceChromaKeyEnabled", configureCall);
+            StringAssert.Contains("resolveVideoSurfaceForVlc", bridgeSource);
+            StringAssert.Contains("surfaceMapper?.release()", bridgeSource);
+            StringAssert.Contains("vout.setVideoSurface(videoSurfaceForVlc, null)", bridgeSource);
+
+            StringAssert.Contains("public static void SetVideoSurfaceMapping(bool fisheyeMappingEnabled, bool chromaKeyEnabled, StereoMode stereo, uint contentWidth, uint contentHeight)", playbackBridgeSource);
+            StringAssert.Contains("bridge.CallStatic(\"setVideoSurfaceMapping\", fisheyeMappingEnabled, chromaKeyEnabled, (int)stereo, (int)contentWidth, (int)contentHeight)", playbackBridgeSource);
+
+            StringAssert.Contains("GL_TEXTURE_EXTERNAL_OES", mapperSource);
+            StringAssert.Contains("samplerExternalOES", mapperSource);
+            StringAssert.Contains("GL_FRAGMENT_PRECISION_HIGH", mapperSource);
+            StringAssert.Contains("precision highp float", mapperSource);
+            StringAssert.Contains("#define XR_FISHEYE_PRECISION highp", mapperSource);
+            StringAssert.Contains("varying highp vec2 vUv", mapperSource);
+            StringAssert.Contains("fun configure(output: Surface, fisheyeMappingEnabled: Boolean, chromaKeyEnabled: Boolean, stereo: Int, width: Int, height: Int)", mapperSource);
+            StringAssert.Contains("SurfaceTexture.OnFrameAvailableListener", mapperSource);
+            StringAssert.Contains("theta = acos", mapperSource);
+            StringAssert.Contains("float fisheyeRadius(float theta)", mapperSource);
+            StringAssert.Contains("return theta / thetaMax", mapperSource);
+            StringAssert.Contains("sin(theta * 0.5)", mapperSource);
+            StringAssert.Contains("tan(theta * 0.5)", mapperSource);
+            StringAssert.Contains("return sin(theta) / sin(thetaMax)", mapperSource);
+            StringAssert.Contains("eglSwapBuffers", mapperSource);
+            StringAssert.Contains("frame rendered", mapperSource);
+        }
+
+        [Test]
+        public void XrSurfaceMapper_ShaderSupportsDirectUvAndStraightAlphaChromaKey()
+        {
+            string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
+
+            StringAssert.Contains("uniform int uFisheyeMappingEnabled", mapperSource);
+            StringAssert.Contains("uniform int uChromaKeyEnabled", mapperSource);
+            StringAssert.Contains("vec2 sampledUv = uv", mapperSource);
+            StringAssert.Contains("if (uFisheyeMappingEnabled != 0)", mapperSource);
+            StringAssert.Contains("vec3 rgbToHsv", mapperSource);
+            StringAssert.Contains("uChromaKeyColor", mapperSource);
+            StringAssert.Contains("uChromaKeyRange", mapperSource);
+            StringAssert.Contains("uChromaKeyFalloff", mapperSource);
+            StringAssert.Contains("min(hueDelta, 1.0 - hueDelta)", mapperSource);
+            StringAssert.Contains("alpha = smoothstep(", mapperSource);
+            StringAssert.Contains("float pitch = (localUv.y - 0.5) * PI;", mapperSource);
+            StringAssert.DoesNotContain("float pitch = (0.5 - localUv.y) * PI;", mapperSource);
+            StringAssert.Contains("vec2 inputUv = vec2(sampledUv.x, 1.0 - sampledUv.y)", mapperSource);
+            StringAssert.Contains("gl_FragColor = vec4(rgb, alpha)", mapperSource);
+            StringAssert.Contains("GLES20.glClearColor(0f, 0f, 0f, 0f)", mapperSource);
+        }
+
+        [Test]
+        public void XrSurfaceMapper_ProbesFramebufferAlphaAndEglColorFormat()
+        {
+            string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
+
+            StringAssert.Contains("GLES20.glReadPixels(", mapperSource);
+            StringAssert.Contains("GLES20.GL_RGBA", mapperSource);
+            StringAssert.Contains("GLES20.GL_UNSIGNED_BYTE", mapperSource);
+            StringAssert.Contains("framebuffer alpha probe", mapperSource);
+            StringAssert.Contains("zeroAlpha=", mapperSource);
+            StringAssert.Contains("EGL14.EGL_ALPHA_SIZE", mapperSource);
+            StringAssert.Contains("EGL14.EGL_NATIVE_VISUAL_ID", mapperSource);
+            StringAssert.Contains("egl config", mapperSource);
+        }
+
+        [Test]
+        public void AndroidBridge_FallsBackToDirectSurfaceWhenMapperRenderingFails()
+        {
+            string bridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
+            string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
+            int drawFrameStart = mapperSource.IndexOf("private fun drawFrame()", System.StringComparison.Ordinal);
+            int drawFrameEnd = mapperSource.IndexOf("private fun queryOutputSize()", drawFrameStart, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(drawFrameStart, 0);
+            Assert.Greater(drawFrameEnd, drawFrameStart);
+            string drawFrameBlock = mapperSource.Substring(drawFrameStart, drawFrameEnd - drawFrameStart);
+
+            StringAssert.Contains("onRenderFailure: (XrSurfaceMapper, Throwable) -> Unit", mapperSource);
+            StringAssert.Contains("check(EGL14.eglSwapBuffers(eglDisplay, eglSurface))", drawFrameBlock);
+            StringAssert.Contains("onRenderFailure(this, it)", drawFrameBlock);
+
+            StringAssert.Contains("XrSurfaceMapper(::handleSurfaceMapperFailure)", bridgeSource);
+            int handlerStart = bridgeSource.IndexOf("private fun handleSurfaceMapperFailure(mapper: XrSurfaceMapper, error: Throwable)", System.StringComparison.Ordinal);
+            int handlerEnd = bridgeSource.IndexOf("\n    private fun ", handlerStart + 1, System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(handlerStart, 0);
+            Assert.Greater(handlerEnd, handlerStart);
+            string handlerBlock = bridgeSource.Substring(handlerStart, handlerEnd - handlerStart);
+            StringAssert.Contains("mainHandler.post", handlerBlock);
+            StringAssert.Contains("if (surfaceMapper !== mapper) return@post", handlerBlock);
+            StringAssert.Contains("videoSurfaceFisheyeMappingEnabled = false", handlerBlock);
+            StringAssert.Contains("videoSurfaceChromaKeyEnabled = false", handlerBlock);
+            StringAssert.Contains("releaseSurfaceMapper(", handlerBlock);
+            StringAssert.Contains("configureVoutSurfacesSafely(", handlerBlock);
         }
 
         [Test]

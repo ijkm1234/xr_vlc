@@ -83,7 +83,9 @@ namespace XRVLC
             if (name.Contains("equirect") || name.Contains("vr360") || name.Contains("360vr") ||
                 name.Contains("3d360") || ContainsToken(name, "360"))
                 proj = VideoProjection.Sphere360;
-            else if (name.Contains("fisheye") || name.Contains("vr180") || name.Contains("180vr") ||
+            else if (name.Contains("fisheye"))
+                proj = VideoProjection.Fisheye180;
+            else if (name.Contains("vr180") || name.Contains("180vr") ||
                      name.Contains("3d180") || ContainsToken(name, "180"))
                 proj = VideoProjection.Sphere180;
             else if (name.Contains("cylinder") || ContainsToken(name, "cyl"))

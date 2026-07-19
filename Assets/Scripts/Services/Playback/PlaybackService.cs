@@ -17,15 +17,16 @@ namespace XRVLC.Media
         private const string DisabledSubtitleTrack = "-1";
         private const float ShortcutFastRate = 2f;
         private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
+        private const float SurfaceRebuildPauseTimeoutSeconds = 1.5f;
 
         public static PlaybackService Instance { get; private set; }
 
-        public PlayerStatus CurrentStatus => VlcPlaybackEvents.Snapshot.Status;
         public bool UseHardwareDecoding { get; private set; } = true;
         public SubtitleRenderMode SubtitleRenderMode { get; private set; } = SubtitleRenderMode.Spatial;
         public bool RenderSubtitlesOutsideScreen { get; private set; }
         public float SubtitleDelaySeconds { get; private set; }
         public VideoGeometrySelection CurrentGeometrySelection => _currentGeometrySelection;
+        public ChromaKeySettings CurrentChromaKeySettings => _chromaKeySettings;
         public VideoScaleMode CurrentVideoScaleMode { get; private set; } = VideoScaleMode.Fit;
         public VideoAspectRatio CurrentVideoAspectRatio { get; private set; } = VideoAspectRatio.Source;
         
@@ -45,11 +46,11 @@ namespace XRVLC.Media
         public event Action<float> OnBuffering;
         public event Action<List<TrackInfo>> OnAudioTracksChanged;
         public event Action<List<TrackInfo>> OnSubtitleTracksChanged;
+        public event Action<ChromaKeySettings> OnChromaKeySettingsChanged;
+        public event Action<bool> OnChromaKeyColorExtractionCompleted;
 #pragma warning restore 0067
 
         // --- PlayerController 状态 ---
-        private string _pendingUrl = "";
-        private long _pendingStartTimeMs = 0;
         private int _currentWidth = 0;
         private int _currentHeight = 0;
         private int _currentVisibleWidth = 0;
@@ -57,18 +58,55 @@ namespace XRVLC.Media
         private readonly TrackSelectionService _trackSelectionService = new TrackSelectionService();
         private bool _isShortcutFastRate;
         private VideoScreenGeometryService _geometryService;
-        private PlayerStatus _lastNotifiedStatus = PlayerStatus.Idle;
         private bool _hasManualGeometryOverride;
+        private FisheyeProjectionFormula _fisheyeProjectionFormula = FisheyeProjectionFormula.Equidistant;
+        private ChromaKeySettings _chromaKeySettings = ChromaKeySettings.Default;
         private VideoGeometrySelection _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
         private VideoGeometrySelection _currentGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
         private Coroutine _geometryBindingCoroutine;
         private Coroutine _nativeSubtitleSurfaceCoroutine;
+        private long _nextVideoOutputSwitchToken;
+        private long _activeVideoOutputSwitchToken;
+        private long _activeMediaRequestId;
+        private VideoOutputSwitchState _videoOutputSwitchState;
         private VideoSurfaceSpec? _boundVideoSurfaceSpec;
         private SubtitleSurfaceSpec? _boundSubtitleSurfaceSpec;
         private bool _videoSurfaceBoundToVlc;
         private bool _subtitleSurfaceBoundToVlc;
+        private readonly Queue<PendingPlaybackRequest> _pendingPlaybackRequests =
+            new Queue<PendingPlaybackRequest>();
         private VlcVideoSize CurrentVideoSize =>
             new VlcVideoSize(_currentWidth, _currentHeight, _currentVisibleWidth, _currentVisibleHeight);
+
+        private enum VideoOutputSwitchState
+        {
+            None,
+            AwaitDetached,
+            Detached,
+            AwaitReady,
+            Ready,
+            Failed
+        }
+
+        private enum VideoOutputRebindKind
+        {
+            GeometryOnly,
+            ReuseLayer,
+            RebuildLayer
+        }
+
+        private sealed class PendingPlaybackRequest
+        {
+            public PendingPlaybackRequest(MediaWrapper media, long mediaRequestId)
+            {
+                Media = media;
+                MediaRequestId = mediaRequestId;
+            }
+
+            public MediaWrapper Media { get; }
+            public long MediaRequestId { get; }
+            public VlcMediaParseResult ParseResult { get; set; }
+        }
 
         private static void SurfaceDebug(string message)
         {
@@ -113,9 +151,6 @@ namespace XRVLC.Media
             }
         }
 
-        private long _currentTotalTime = 0;
-        private long _currentTime = 0;
-
         private void Start()
         {
             if (videoScreen == null)
@@ -141,6 +176,8 @@ namespace XRVLC.Media
             VlcPlaybackEvents.OnBuffering += HandleBuffering;
             VlcPlaybackEvents.OnAudioTracksChanged += HandleAudioTracksChanged;
             VlcPlaybackEvents.OnSubtitleTracksChanged += HandleSubtitleTracksChanged;
+            VlcPlaybackEvents.OnChromaKeyColorExtracted += HandleChromaKeyColorExtracted;
+            VlcPlaybackEvents.OnVideoOutputSwitch += HandleVideoOutputSwitchEvent;
             VlcPlaybackEvents.OnPlayRequested += LoadAndPlay;
             VlcPlaybackEvents.OnClearPlaybackSurface += ClearPlaybackSurfaceForMediaSwitch;
 
@@ -163,50 +200,40 @@ namespace XRVLC.Media
             VlcPlaybackEvents.OnBuffering -= HandleBuffering;
             VlcPlaybackEvents.OnAudioTracksChanged -= HandleAudioTracksChanged;
             VlcPlaybackEvents.OnSubtitleTracksChanged -= HandleSubtitleTracksChanged;
+            VlcPlaybackEvents.OnChromaKeyColorExtracted -= HandleChromaKeyColorExtracted;
+            VlcPlaybackEvents.OnVideoOutputSwitch -= HandleVideoOutputSwitchEvent;
             VlcPlaybackEvents.OnPlayRequested -= LoadAndPlay;
             VlcPlaybackEvents.OnClearPlaybackSurface -= ClearPlaybackSurfaceForMediaSwitch;
         }
 
         private void HandleStatusChanged(PlayerStatus status)
         {
-            if (_lastNotifiedStatus == status) return;
             Debug.Log($"[PlaybackService] 当前播放状态: {status}");
-            VlcPlaybackEvents.Snapshot.Status = status;
-            _lastNotifiedStatus = status;
+            SurfaceDebug($"status_changed value={status} state={FormatSurfaceState()}");
             OnStatusChanged?.Invoke(status);
         }
 
         // --------------------------------------------------------
         // 播放逻辑 (原 PlayerController 逻辑)
         // --------------------------------------------------------
-        public void PlayVideo(string path, long startTimeMs = 0, string extraData = null)
+        public long PlayVideo(string path, long startTimeMs = 0, string extraData = null)
         {
             if (videoScreen == null)
             {
                 Debug.LogError("[PlaybackService] 缺少 VideoScreen！");
-                return;
+                return 0L;
             }
 
             Debug.Log($"[PlaybackService] 准备播放: {XRVLC.Utils.UriUtils.RedactUri(path)}");
-            HandleStatusChanged(PlayerStatus.Opening);
 
-            // 1. 记录待播放的参数
-            _pendingUrl = path;
-            _pendingStartTimeMs = startTimeMs;
-            _currentWidth = 0;
-            _currentHeight = 0;
-            _currentVisibleWidth = 0;
-            _currentVisibleHeight = 0;
-
-            // 2. 告诉 AAR 预加载 URL
-            // 获取暂存的 JSON 字符串，如果为空则直接使用 URI
+            // 获取暂存的 JSON 字符串，如果为空则直接使用 URI。
             string payload = !string.IsNullOrEmpty(extraData) ? extraData : path;
             bool payloadIsJson = payload != null && payload.TrimStart().StartsWith("{", StringComparison.Ordinal);
             Debug.Log($"[PlaybackService] 最终传给 AAR 的 payload: {payload}");
             SurfaceDebug(
                 $"play_video preload path={RedactForLog(path)} current={RedactForLog(CurrentMedia?.Uri)} " +
                 $"start={startTimeMs} payloadIsJson={payloadIsJson}");
-            VlcPlaybackBridge.PreloadLocation(payload);
+            return VlcPlaybackBridge.PreloadLocation(payload);
         }
 
         /// <summary>
@@ -221,22 +248,16 @@ namespace XRVLC.Media
                 return;
             }
 
-            string normalizedCallbackUri = NormalizeMediaUri(result.uri);
-            string normalizedCurrentUri = NormalizeMediaUri(CurrentMedia?.Uri);
-            bool isCurrentUri = string.Equals(normalizedCurrentUri, normalizedCallbackUri, StringComparison.Ordinal);
+            PendingPlaybackRequest request = FindPendingPlaybackRequest(result.MediaRequestId);
             SurfaceDebug(
-                $"parse_finished received uriMatch={isCurrentUri} callback={RedactForLog(result.uri)} " +
-                $"current={RedactForLog(CurrentMedia?.Uri)} raw={result.width}x{result.height} " +
+                $"parse_finished received request={result.MediaRequestId} queued={request != null} " +
+                $"callback={RedactForLog(result.uri)} raw={result.width}x{result.height} " +
                 $"visible={result.visibleWidth}x{result.visibleHeight} projection={result.projection} " +
                 $"duration={result.duration} state={FormatSurfaceState()}");
 
-            if (!isCurrentUri)
+            if (request == null)
             {
-                Debug.Log(
-                    $"[PlaybackService] Ignoring media parse callback for stale uri: callback={result.uri}, current={CurrentMedia?.Uri}");
-                SurfaceDebug(
-                    $"parse_finished ignored stale normalizedCallback={RedactForLog(normalizedCallbackUri)} " +
-                    $"normalizedCurrent={RedactForLog(normalizedCurrentUri)}");
+                SurfaceDebug($"parse_finished ignored unknown_request request={result.MediaRequestId}");
                 return;
             }
 
@@ -251,23 +272,75 @@ namespace XRVLC.Media
                 return;
             }
 
-            SetCurrentVideoSize(videoSize);
+            request.ParseResult = result;
+            StartNextParsedPlaybackRequest();
+        }
 
-            // 将 Android 解析出的 projection 写回 CurrentMedia，
-            // ProjectionDetector 会把它作为 Priority 1 使用。
-            if (CurrentMedia != null && result.projection != "flat")
+        private PendingPlaybackRequest FindPendingPlaybackRequest(long mediaRequestId)
+        {
+            foreach (PendingPlaybackRequest request in _pendingPlaybackRequests)
             {
-                CurrentMedia.Projection = result.projection switch
-                {
-                    "360" => MediaProjectionType.Sphere360,
-                    "180" => MediaProjectionType.Sphere180,
-                    _     => MediaProjectionType.Flat2D
-                };
+                if (request.MediaRequestId == mediaRequestId)
+                    return request;
             }
 
-            Debug.Log($"[PlaybackService] OnMediaParseFinished: raw={width}x{height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}, projection={result.projection}, duration={result.duration}ms");
-            SurfaceDebug($"parse_finished accepted content={videoSize.ContentWidth}x{videoSize.ContentHeight} before_rebuild state={FormatSurfaceState()}");
-            RebuildAndApplyGeometry(videoSize);
+            return null;
+        }
+
+        private void StartNextParsedPlaybackRequest()
+        {
+            if (_activeMediaRequestId != 0L || _pendingPlaybackRequests.Count == 0)
+                return;
+
+            PendingPlaybackRequest request = _pendingPlaybackRequests.Peek();
+            VlcMediaParseResult result = request.ParseResult;
+            if (result == null)
+                return;
+
+            VlcVideoSize videoSize = result.ToVideoSize();
+            if (!videoSize.IsValid)
+            {
+                SurfaceDebug($"parse_finished queued_request_invalid request={request.MediaRequestId}");
+                return;
+            }
+
+            _activeMediaRequestId = request.MediaRequestId;
+            CurrentMedia = request.Media;
+            CurrentMedia.DurationMs = Math.Max(0L, result.duration);
+            CurrentMedia.Projection = result.projection switch
+            {
+                "360" => MediaProjectionType.Sphere360,
+                "180" => MediaProjectionType.Sphere180,
+                _ => MediaProjectionType.Flat2D
+            };
+            _hasManualGeometryOverride = false;
+            _fisheyeProjectionFormula = FisheyeProjectionFormula.Equidistant;
+            _chromaKeySettings = ChromaKeySettings.Default;
+            _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
+            ResetShortcutPlaybackState(CurrentMedia);
+            SetCurrentVideoSize(videoSize);
+            OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings);
+            OnMediaChanged?.Invoke(CurrentMedia, 0);
+            SurfaceDebug(
+                $"parse_finished start_head request={request.MediaRequestId} uri={RedactForLog(CurrentMedia.Uri)} " +
+                $"content={videoSize.ContentWidth}x{videoSize.ContentHeight} duration={CurrentMedia.DurationMs}");
+            RebuildAndApplyGeometry(videoSize, request.MediaRequestId);
+        }
+
+        private void CompleteActivePlaybackRequest(long mediaRequestId, string reason)
+        {
+            if (mediaRequestId == 0L || _activeMediaRequestId != mediaRequestId)
+                return;
+
+            if (_pendingPlaybackRequests.Count > 0
+                && _pendingPlaybackRequests.Peek().MediaRequestId == mediaRequestId)
+            {
+                _pendingPlaybackRequests.Dequeue();
+            }
+
+            SurfaceDebug($"playback_request complete request={mediaRequestId} reason={reason} queued={_pendingPlaybackRequests.Count}");
+            _activeMediaRequestId = 0L;
+            StartNextParsedPlaybackRequest();
         }
 
         /// <summary>
@@ -284,6 +357,14 @@ namespace XRVLC.Media
             if (!videoSize.IsValid)
             {
                 SurfaceDebug("layout_callback ignored invalid_size");
+                return;
+            }
+
+            if (_activeMediaRequestId != 0L || _pendingPlaybackRequests.Count > 0)
+            {
+                SurfaceDebug(
+                    $"layout_callback ignored queued_request active={_activeMediaRequestId} " +
+                    $"queued={_pendingPlaybackRequests.Count}");
                 return;
             }
 
@@ -317,7 +398,7 @@ namespace XRVLC.Media
             RebuildAndApplyGeometry(videoSize);
         }
 
-        private void RebuildAndApplyGeometry(VlcVideoSize videoSize)
+        private void RebuildAndApplyGeometry(VlcVideoSize videoSize, long mediaRequestId = 0L)
         {
             if (_geometryService == null && videoScreen != null)
                 _geometryService = CreateGeometryService(videoScreen);
@@ -326,14 +407,15 @@ namespace XRVLC.Media
                 _currentGeometrySelection = ResolveRequestedGeometry();
                 if (_geometryBindingCoroutine != null)
                 {
-                    SurfaceDebug("rebuild_geometry stopping_previous_coroutine");
-                    StopCoroutine(_geometryBindingCoroutine);
+                    SurfaceDebug("rebuild_geometry queued_while_active");
+                    return;
                 }
                 SurfaceDebug(
                     $"rebuild_geometry start content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
                     $"projection={_currentGeometrySelection.Projection} stereo={_currentGeometrySelection.Stereo} " +
-                    $"state={FormatSurfaceState()}");
-                _geometryBindingCoroutine = StartCoroutine(RebuildGeometryAndSubtitleSurface(videoSize));
+                    $"mediaRequest={mediaRequestId} state={FormatSurfaceState()}");
+                _geometryBindingCoroutine = StartCoroutine(
+                    RebuildGeometryAndSubtitleSurface(videoSize, mediaRequestId));
             }
             else
             {
@@ -352,33 +434,67 @@ namespace XRVLC.Media
                 () => CurrentVideoAspectRatio);
         }
 
-        private IEnumerator RebuildGeometryAndSubtitleSurface(VlcVideoSize videoSize)
+        private IEnumerator RebuildGeometryAndSubtitleSurface(VlcVideoSize videoSize, long mediaRequestId)
         {
             CancelNativeSubtitleSurfaceCoroutine();
             _currentGeometrySelection = ResolveRequestedGeometry();
             VideoSurfaceSpec videoSpec = CreateVideoSurfaceSpec(videoSize, _currentGeometrySelection);
-            bool shouldRebuildVideoSurface = ShouldRebuildVideoSurface(videoSpec);
+            VideoOutputRebindKind rebindKind = GetVideoOutputRebindKind(videoSpec, mediaRequestId);
+            if (mediaRequestId > 0L && rebindKind == VideoOutputRebindKind.GeometryOnly)
+                rebindKind = VideoOutputRebindKind.ReuseLayer;
             SurfaceDebug(
-                $"surface_rebuild begin shouldRebuildVideo={shouldRebuildVideoSurface} " +
+                $"surface_rebuild begin kind={rebindKind} mediaRequest={mediaRequestId} " +
                 $"videoSpec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} " +
                 $"state={FormatSurfaceState()}");
-            if (shouldRebuildVideoSurface)
-            {
-                if (_videoSurfaceBoundToVlc)
-                {
-                    SurfaceDebug("surface_rebuild detaching_previous_video_surface");
-                    VlcPlaybackBridge.DetachSurface();
-                    _videoSurfaceBoundToVlc = false;
-                }
 
-                _geometryService.Rebuild(videoSize);
+            if (rebindKind == VideoOutputRebindKind.GeometryOnly)
+            {
+                ApplyManualGeometryWithoutRebuild(
+                    videoSpec.Projection,
+                    videoSpec.Stereo,
+                    videoSpec.CurveMode);
+                _boundVideoSurfaceSpec = videoSpec;
+                Play();
+                _geometryBindingCoroutine = null;
+                CompleteActivePlaybackRequest(mediaRequestId, "geometry-only");
+                yield break;
+            }
+
+            if (VlcPlaybackBridge.IsPlaying())
+            {
+                Pause();
+                yield return WaitForPausedBeforeSurfaceRebuild();
+            }
+
+            long token = ++_nextVideoOutputSwitchToken;
+            _activeVideoOutputSwitchToken = token;
+            _videoOutputSwitchState = VideoOutputSwitchState.AwaitDetached;
+            SurfaceDebug($"video_output_switch begin token={token} mediaRequest={mediaRequestId} kind={rebindKind}");
+            VlcPlaybackBridge.BeginVideoOutputDetach(token);
+            yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Detached, 1.5f);
+            if (_activeVideoOutputSwitchToken != token || _videoOutputSwitchState != VideoOutputSwitchState.Detached)
+            {
+                SurfaceDebug($"video_output_switch detach_failed token={token} state={_videoOutputSwitchState}");
+                _geometryBindingCoroutine = null;
+                CompleteActivePlaybackRequest(mediaRequestId, "detach-failed");
+                yield break;
+            }
+
+            // Do not destroy/reuse a PICO layer until Android has confirmed old Vout=0.
+            _videoSurfaceBoundToVlc = false;
+            _boundVideoSurfaceSpec = null;
+            DisableAndDetachSubtitleSurface(false);
+            if (rebindKind == VideoOutputRebindKind.RebuildLayer)
+            {
+                _geometryService.Rebuild(videoSize, videoSpec.ChromaKeyEnabled);
                 SurfaceDebug($"surface_rebuild after_geometry_rebuild state={FormatSurfaceState()}");
             }
             else
             {
-                Debug.Log(
-                    $"[PlaybackService] Video surface rebuild skipped: content={videoSpec.ContentWidth}x{videoSpec.ContentHeight}, " +
-                    $"projection={videoSpec.Projection}, stereo={videoSpec.Stereo}, curve={videoSpec.CurveMode}");
+                ApplyManualGeometryWithoutRebuild(
+                    videoSpec.Projection,
+                    videoSpec.Stereo,
+                    videoSpec.CurveMode);
             }
 
             VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
@@ -387,14 +503,58 @@ namespace XRVLC.Media
                 $"surface_rebuild before_wait shouldBindSubtitle={shouldBindSubtitleSurface} " +
                 $"state={FormatSurfaceState()}");
 
-            yield return WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface);
+            yield return WaitForVideoAndSubtitleSurfaces(
+                rebindKind == VideoOutputRebindKind.RebuildLayer,
+                shouldBindSubtitleSurface);
             SurfaceDebug($"surface_rebuild after_wait state={FormatSurfaceState()}");
 
-            BindVideoSurface(videoSpec);
             if (shouldBindSubtitleSurface)
                 BindSubtitleSurface(subtitleSpec);
+            if (!BeginVideoOutputAttach(token, mediaRequestId, videoSpec))
+            {
+                _geometryBindingCoroutine = null;
+                CompleteActivePlaybackRequest(mediaRequestId, "attach-not-started");
+                yield break;
+            }
+            yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Ready, 5f);
+            if (_activeVideoOutputSwitchToken == token && _videoOutputSwitchState == VideoOutputSwitchState.Ready)
+            {
+                _boundVideoSurfaceSpec = videoSpec;
+                _videoSurfaceBoundToVlc = true;
+                _activeVideoOutputSwitchToken = 0L;
+                _videoOutputSwitchState = VideoOutputSwitchState.None;
+                _geometryBindingCoroutine = null;
+                CompleteActivePlaybackRequest(mediaRequestId, "ready");
+                yield break;
+            }
+            else
+            {
+                SurfaceDebug($"video_output_switch attach_failed token={token} state={_videoOutputSwitchState}");
+                CompleteActivePlaybackRequest(mediaRequestId, "attach-failed");
+            }
 
             _geometryBindingCoroutine = null;
+        }
+
+        private IEnumerator WaitForPausedBeforeSurfaceRebuild()
+        {
+            float waitStartedAt = Time.realtimeSinceStartup;
+            while (VlcPlaybackBridge.IsPlaying()
+                   && Time.realtimeSinceStartup - waitStartedAt < SurfaceRebuildPauseTimeoutSeconds)
+            {
+                yield return null;
+            }
+
+            bool pauseConfirmed = !VlcPlaybackBridge.IsPlaying();
+            SurfaceDebug(
+                $"surface_rebuild pause_wait complete confirmed={pauseConfirmed} " +
+                $"elapsedMs={(long)((Time.realtimeSinceStartup - waitStartedAt) * 1000f)} " +
+                $"state={FormatSurfaceState()}");
+            if (!pauseConfirmed)
+            {
+                Debug.LogWarning(
+                    "[PlaybackService] Timed out waiting for VLC pause before surface rebuild.");
+            }
         }
 
         private IEnumerator WaitForVideoAndSubtitleSurfaces(bool shouldWaitForVideoSurface, bool shouldBindSubtitleSurface)
@@ -433,27 +593,111 @@ namespace XRVLC.Media
                 $"subtitleRequired={shouldBindSubtitleSurface} state={FormatSurfaceState()}");
         }
 
-        private void BindVideoSurface(VideoSurfaceSpec videoSpec)
+        private bool BeginVideoOutputAttach(long token, long mediaRequestId, VideoSurfaceSpec videoSpec)
         {
             if (videoScreen == null)
-                return;
+                return false;
 
             IntPtr videoSurfacePtr = videoScreen.GetHardwareSurfaceHandle();
             SurfaceDebug(
-                $"bind_video enter surface={videoSurfacePtr} spec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/" +
+                $"video_output_switch attach token={token} mediaRequest={mediaRequestId} surface={videoSurfacePtr} spec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/" +
                 $"{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} state={FormatSurfaceState()}");
             if (videoSurfacePtr == IntPtr.Zero)
             {
-                Debug.LogError("[PlaybackService] Skipping VLC surface bind because video surface is not ready.");
-                SurfaceDebug("bind_video skipped zero_surface");
+                Debug.LogError("[PlaybackService] Skipping Vout attach because video surface is not ready.");
+                SurfaceDebug("video_output_switch attach_skipped zero_surface");
+                VlcPlaybackBridge.CancelVideoOutputSwitch(token);
+                return false;
+            }
+
+            bool fisheyeMappingEnabled = videoSpec.Projection == VideoProjection.Fisheye180;
+            // Processing parameters are cached by Android before the single attach.
+            ApplyVideoSurfaceProcessingParameters();
+            _videoOutputSwitchState = VideoOutputSwitchState.AwaitReady;
+            VlcPlaybackBridge.AttachVideoOutput(
+                token,
+                mediaRequestId,
+                videoSurfacePtr,
+                fisheyeMappingEnabled,
+                videoSpec.ChromaKeyEnabled,
+                videoSpec.Stereo,
+                videoSpec.ContentWidth,
+                videoSpec.ContentHeight);
+            return true;
+        }
+
+        private IEnumerator WaitForVideoOutputSwitch(
+            long token,
+            VideoOutputSwitchState completedState,
+            float timeoutSeconds)
+        {
+            float waitStartedAt = Time.realtimeSinceStartup;
+            while (_activeVideoOutputSwitchToken == token
+                   && _videoOutputSwitchState != completedState
+                   && _videoOutputSwitchState != VideoOutputSwitchState.Failed
+                   && Time.realtimeSinceStartup - waitStartedAt < timeoutSeconds)
+            {
+                yield return null;
+            }
+
+            if (_activeVideoOutputSwitchToken == token
+                && _videoOutputSwitchState != completedState
+                && _videoOutputSwitchState != VideoOutputSwitchState.Failed)
+            {
+                SurfaceDebug(
+                    $"video_output_switch unity_timeout token={token} expected={completedState} " +
+                    $"elapsedMs={(long)((Time.realtimeSinceStartup - waitStartedAt) * 1000f)}");
+                VlcPlaybackBridge.CancelVideoOutputSwitch(token);
+                _videoOutputSwitchState = VideoOutputSwitchState.Failed;
+            }
+        }
+
+        private void HandleVideoOutputSwitchEvent(string payload)
+        {
+            string[] parts = (payload ?? string.Empty).Split('|');
+            if (parts.Length < 2 || !long.TryParse(parts[0], out long token))
+            {
+                SurfaceDebug($"video_output_switch ignored malformed_event payload={payload}");
+                return;
+            }
+            if (token != _activeVideoOutputSwitchToken)
+            {
+                SurfaceDebug($"video_output_switch ignored stale_event token={token} active={_activeVideoOutputSwitchToken} payload={payload}");
                 return;
             }
 
-            VlcPlaybackBridge.SetSurface(videoSurfacePtr);
-            _boundVideoSurfaceSpec = videoSpec;
-            _videoSurfaceBoundToVlc = true;
-            Debug.Log($"[PlaybackService] Bound video surface: surface={videoSurfacePtr}, content={videoSpec.ContentWidth}x{videoSpec.ContentHeight}, projection={videoSpec.Projection}");
-            SurfaceDebug($"bind_video done surface={videoSurfacePtr} state={FormatSurfaceState()}");
+            switch (parts[1])
+            {
+                case "detached":
+                    if (_videoOutputSwitchState == VideoOutputSwitchState.AwaitDetached)
+                        _videoOutputSwitchState = VideoOutputSwitchState.Detached;
+                    break;
+                case "ready":
+                    if (_videoOutputSwitchState == VideoOutputSwitchState.AwaitReady)
+                        _videoOutputSwitchState = VideoOutputSwitchState.Ready;
+                    break;
+                case "failed":
+                    _videoOutputSwitchState = VideoOutputSwitchState.Failed;
+                    break;
+                default:
+                    SurfaceDebug($"video_output_switch ignored unknown_event payload={payload}");
+                    return;
+            }
+
+            SurfaceDebug(
+                $"video_output_switch event token={token} state={parts[1]} reason=" +
+                $"{(parts.Length > 2 ? parts[2] : "-")}");
+        }
+
+        private void CancelActiveVideoOutputSwitch(string reason)
+        {
+            if (_activeVideoOutputSwitchToken == 0L)
+                return;
+
+            SurfaceDebug($"video_output_switch cancel token={_activeVideoOutputSwitchToken} reason={reason}");
+            VlcPlaybackBridge.CancelVideoOutputSwitch(_activeVideoOutputSwitchToken);
+            _activeVideoOutputSwitchToken = 0L;
+            _videoOutputSwitchState = VideoOutputSwitchState.None;
         }
 
         private void BindSubtitleSurface(SubtitleSurfaceSpec subtitleSpec)
@@ -498,27 +742,6 @@ namespace XRVLC.Media
             _currentVisibleHeight = videoSize.VisibleHeight;
         }
 
-        private bool IsCurrentMediaUri(string callbackUri)
-        {
-            return CurrentMedia != null
-                && string.Equals(NormalizeMediaUri(CurrentMedia.Uri), NormalizeMediaUri(callbackUri), StringComparison.Ordinal);
-        }
-
-        private static string NormalizeMediaUri(string uri)
-        {
-            if (string.IsNullOrEmpty(uri))
-                return string.Empty;
-
-            try
-            {
-                return Uri.UnescapeDataString(uri).Trim();
-            }
-            catch (UriFormatException)
-            {
-                return uri.Trim();
-            }
-        }
-
         private VideoGeometrySelection? GetManualGeometryOverride()
         {
             return _hasManualGeometryOverride ? _manualGeometrySelection : (VideoGeometrySelection?)null;
@@ -530,13 +753,19 @@ namespace XRVLC.Media
                 return _manualGeometrySelection;
 
             var (projection, stereo) = XRVLC.ProjectionDetector.Detect(CurrentMedia);
-            return new VideoGeometrySelection(projection, stereo, FlatVideoCurveMode.None);
+            return new VideoGeometrySelection(
+                projection,
+                stereo,
+                FlatVideoCurveMode.None,
+                _fisheyeProjectionFormula);
         }
 
         private void OnStateChanged(string state)
         {
             switch (state)
             {
+                case "Opening": HandleStatusChanged(PlayerStatus.Opening); break;
+                case "Buffering": HandleStatusChanged(PlayerStatus.Buffering); break;
                 case "Playing": HandleStatusChanged(PlayerStatus.Playing); break;
                 case "Paused": HandleStatusChanged(PlayerStatus.Paused); break;
                 case "Stopped": HandleStatusChanged(PlayerStatus.Stopped); break;
@@ -551,25 +780,24 @@ namespace XRVLC.Media
 
         private void HandleTimeChanged(long timeMs)
         {
-            _currentTime = timeMs;
-            OnTimeChanged?.Invoke(timeMs, _currentTotalTime);
+            long totalTimeMs = CurrentMedia?.DurationMs ?? 0L;
+            if (totalTimeMs <= 0L)
+                totalTimeMs = Math.Max(0L, VlcPlaybackBridge.GetLength());
+            SurfaceDebug($"event_time_changed time={timeMs} total={totalTimeMs}");
+            OnTimeChanged?.Invoke(timeMs, totalTimeMs);
         }
 
         private void HandleLengthChanged(long length)
         {
-            _currentTotalTime = length;
-            // OnMediaParsed?.Invoke(length); // 如果有其他地方依赖可以补充
+            long duration = Math.Max(0L, length);
+            if (CurrentMedia != null)
+                CurrentMedia.DurationMs = duration;
+            SurfaceDebug($"event_length_changed length={duration}");
         }
 
         private void HandleBuffering(float buffering)
         {
-            if (CurrentStatus == PlayerStatus.Paused)
-                return;
-
             OnBuffering?.Invoke(buffering);
-
-            if (buffering < 100f) HandleStatusChanged(PlayerStatus.Buffering);
-            else HandleStatusChanged(PlayerStatus.Playing);
         }
 
         private void HandleAudioTracksChanged(List<TrackInfo> tracks)
@@ -584,6 +812,9 @@ namespace XRVLC.Media
 
         private void StopInternal()
         {
+            CancelActiveVideoOutputSwitch("stop");
+            _pendingPlaybackRequests.Clear();
+            _activeMediaRequestId = 0L;
             _currentWidth = 0;
             _currentHeight = 0;
             _currentVisibleWidth = 0;
@@ -593,22 +824,19 @@ namespace XRVLC.Media
             
             DisableAndDetachSubtitleSurface(false);
             VlcPlaybackBridge.Stop();
-            VlcPlaybackBridge.DetachSurface();
-            _videoSurfaceBoundToVlc = false;
-            _boundVideoSurfaceSpec = null;
+            DetachVideoSurfaceFromVlc();
 
             if (videoScreen != null)
             {
                 videoScreen.DestroyFlatSubtitleLayer();
                 videoScreen.DestroyLayer();
             }
-
-            HandleStatusChanged(PlayerStatus.Stopped);
         }
 
         private void ClearPlaybackSurfaceForMediaSwitch()
         {
             Debug.Log("[PlaybackService] Clearing Unity playback surfaces before media switch.");
+            CancelActiveVideoOutputSwitch("release-only");
             ClearPendingSurfaceBindingCoroutines();
             _currentWidth = 0;
             _currentHeight = 0;
@@ -616,9 +844,7 @@ namespace XRVLC.Media
             _currentVisibleHeight = 0;
 
             DisableAndDetachSubtitleSurface(false);
-            VlcPlaybackBridge.DetachSurface();
-            _videoSurfaceBoundToVlc = false;
-            _boundVideoSurfaceSpec = null;
+            DetachVideoSurfaceFromVlc();
 
             if (videoScreen != null)
             {
@@ -656,7 +882,9 @@ namespace XRVLC.Media
 
         public void DetachVideoScreen()
         {
+            CancelActiveVideoOutputSwitch("detach-video-screen");
             DisableAndDetachSubtitleSurface(false);
+            DetachVideoSurfaceFromVlc();
             videoScreen?.DestroyFlatSubtitleLayer();
             videoScreen = null;
             _geometryService = null;
@@ -669,25 +897,21 @@ namespace XRVLC.Media
         // --------------------------------------------------------
         public void LoadAndPlay(MediaWrapper item)
         {
-            CurrentMedia = item;
-            VlcPlaybackEvents.Snapshot.CurrentMedia = item;
-            _hasManualGeometryOverride = false;
-            _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
-            ResetShortcutPlaybackState(item);
-            OnMediaChanged?.Invoke(item, 0); // Position is not accurate but UI doesn't strictly need it
+            if (item == null || string.IsNullOrEmpty(item.Uri))
+                return;
 
-            // Apply projection early (scene layout: hide/show background board, sphere centering)
-            // when the Android side has already told us the projection type.
-            // OnMediaParseFinished will do the authoritative pass once dimensions are known.
-            VideoGeometrySelection initialGeometry = ResolveRequestedGeometry();
-            _currentGeometrySelection = initialGeometry;
-            if (initialGeometry.Projection != VideoProjection.Flat || initialGeometry.Stereo != StereoMode.Mono)
+            long mediaRequestId = PlayVideo(item.Uri, item.Time, item.RawJson);
+            if (mediaRequestId <= 0L)
             {
-                videoScreen.SetGeometry(initialGeometry.Projection, initialGeometry.Stereo, initialGeometry.CurveMode);
+                SurfaceDebug($"load_and_play ignored missing_request uri={RedactForLog(item.Uri)}");
+                return;
             }
 
-            // Unity no longer manages the playlist. AAR tells us to play.
-            PlayVideo(item.Uri, item.Time, item.RawJson);
+            _pendingPlaybackRequests.Enqueue(new PendingPlaybackRequest(item, mediaRequestId));
+            SurfaceDebug(
+                $"load_and_play queued request={mediaRequestId} media={RedactForLog(item.Uri)} " +
+                $"queued={_pendingPlaybackRequests.Count}");
+            StartNextParsedPlaybackRequest();
         }
 
         // --------------------------------------------------------
@@ -695,18 +919,38 @@ namespace XRVLC.Media
         // --------------------------------------------------------
         public void Play()
         {
+            SurfaceDebug($"control_play enter state={FormatSurfaceState()}");
             VlcPlaybackBridge.Play();
+            SurfaceDebug("control_play dispatched");
         }
 
         public void Pause()
         {
+            SurfaceDebug($"control_pause enter state={FormatSurfaceState()}");
             VlcPlaybackBridge.Pause();
+            SurfaceDebug("control_pause dispatched");
         }
 
         public void TogglePlayPause()
         {
-            if (CurrentStatus == PlayerStatus.Playing) Pause();
+            SurfaceDebug("control_toggle enter");
+            if (VlcPlaybackBridge.IsPlaying()) Pause();
             else Play();
+        }
+
+        public PlayerStatus GetLivePlaybackStatus()
+        {
+            return VlcPlaybackBridge.GetPlayerState() switch
+            {
+                1 => PlayerStatus.Opening,
+                2 => PlayerStatus.Buffering,
+                3 => PlayerStatus.Playing,
+                4 => PlayerStatus.Paused,
+                5 => PlayerStatus.Stopped,
+                6 => PlayerStatus.Ended,
+                7 => PlayerStatus.Error,
+                _ => PlayerStatus.Idle
+            };
         }
 
         public void Stop()
@@ -716,7 +960,9 @@ namespace XRVLC.Media
 
         public void SeekTo(long timeMs)
         {
+            SurfaceDebug($"control_seek_time enter target={timeMs}");
             VlcPlaybackBridge.SetTime(timeMs);
+            SurfaceDebug($"control_seek_time dispatched target={timeMs}");
         }
 
         /// <summary>
@@ -724,13 +970,17 @@ namespace XRVLC.Media
         /// </summary>
         public void SeekRelativeSeconds(int seconds)
         {
-            long target = Math.Max(0L, _currentTime + seconds * 1000L);
+            long currentTime = Math.Max(0L, VlcPlaybackBridge.GetTime());
+            long target = Math.Max(0L, currentTime + seconds * 1000L);
+            SurfaceDebug($"control_seek_relative enter seconds={seconds} current={currentTime} target={target}");
             SeekTo(target);
         }
 
         public void SeekToPosition(float position)
         {
+            SurfaceDebug($"control_seek_position enter position={position}");
             VlcPlaybackBridge.Seek(position);
+            SurfaceDebug($"control_seek_position dispatched position={position}");
         }
 
         /// <summary>
@@ -794,8 +1044,11 @@ namespace XRVLC.Media
             if (projection != VideoProjection.Cylinder)
                 curveMode = FlatVideoCurveMode.None;
 
-            VideoGeometrySelection previousGeometry = _currentGeometrySelection;
-            VideoGeometrySelection nextGeometry = new VideoGeometrySelection(projection, stereo, curveMode);
+            VideoGeometrySelection nextGeometry = new VideoGeometrySelection(
+                projection,
+                stereo,
+                curveMode,
+                _fisheyeProjectionFormula);
 
             _hasManualGeometryOverride = true;
             _manualGeometrySelection = nextGeometry;
@@ -805,13 +1058,15 @@ namespace XRVLC.Media
 
             if (CurrentVideoSize.IsValid)
             {
-                if (ShouldRebuildForManualGeometryChange(previousGeometry, nextGeometry))
+                VideoSurfaceSpec nextVideoSpec = CreateVideoSurfaceSpec(CurrentVideoSize, nextGeometry);
+                if (GetVideoOutputRebindKind(nextVideoSpec, 0L) != VideoOutputRebindKind.GeometryOnly)
                 {
                     RebuildAndApplyGeometry(CurrentVideoSize);
                     return;
                 }
 
                 ApplyManualGeometryWithoutRebuild(projection, stereo, curveMode);
+                Play();
                 return;
             }
 
@@ -823,14 +1078,133 @@ namespace XRVLC.Media
         {
             videoScreen.SetGeometry(projection, stereo, curveMode);
             videoScreen.FitVideoSize((uint)CurrentVideoSize.ContentWidth, (uint)CurrentVideoSize.ContentHeight);
-            _currentGeometrySelection = new VideoGeometrySelection(projection, stereo, curveMode);
+            _currentGeometrySelection = new VideoGeometrySelection(
+                projection,
+                stereo,
+                curveMode,
+                _fisheyeProjectionFormula);
         }
 
-        private static bool ShouldRebuildForManualGeometryChange(VideoGeometrySelection previousGeometry, VideoGeometrySelection nextGeometry)
+        public void SetFisheyeProjectionFormula(FisheyeProjectionFormula formula)
         {
-            return previousGeometry.Projection != nextGeometry.Projection
-                || previousGeometry.Stereo != nextGeometry.Stereo
-                || previousGeometry.CurveMode != nextGeometry.CurveMode;
+            if (!Enum.IsDefined(typeof(FisheyeProjectionFormula), formula))
+                formula = FisheyeProjectionFormula.Equidistant;
+            if (_fisheyeProjectionFormula == formula)
+                return;
+
+            _fisheyeProjectionFormula = formula;
+            _currentGeometrySelection.FisheyeProjectionFormula = formula;
+            if (_hasManualGeometryOverride)
+                _manualGeometrySelection.FisheyeProjectionFormula = formula;
+            ApplyVideoSurfaceProcessingParameters();
+            SurfaceDebug($"fisheye_formula_update formula={formula} surfaceRebuild=false");
+            Play();
+        }
+
+        public void SetChromaKeyEnabled(bool enabled)
+        {
+            if (_chromaKeySettings.Enabled == enabled)
+                return;
+
+            _chromaKeySettings = _chromaKeySettings.WithEnabled(enabled);
+            OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings);
+            SurfaceDebug(
+                $"chroma_key_enabled enabled={enabled} key={_chromaKeySettings.ToHex()} " +
+                $"range={_chromaKeySettings.ColorRange:F3} falloff={_chromaKeySettings.Falloff:F3}");
+
+            if (CurrentVideoSize.IsValid && videoScreen != null)
+                RebuildAndApplyGeometry(CurrentVideoSize);
+        }
+
+        public void SetChromaKeyColor(Color keyColor)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithKeyColor(keyColor);
+            NotifyChromaKeyProcessingParametersChanged("key-color");
+        }
+
+        public void SetChromaKeyColorRange(float colorRange)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithColorRange(colorRange);
+            NotifyChromaKeyProcessingParametersChanged("color-range");
+        }
+
+        public void SetChromaKeyFalloff(float falloff)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithFalloff(falloff);
+            NotifyChromaKeyProcessingParametersChanged("falloff");
+        }
+
+        public void SetChromaKeyEdgeSmoothEnabled(bool enabled)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithEdgeSmoothEnabled(enabled);
+            NotifyChromaKeyProcessingParametersChanged("edge-smooth");
+        }
+
+        public void SetChromaKeyClipBlackEnabled(bool enabled)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithClipBlackEnabled(enabled);
+            NotifyChromaKeyProcessingParametersChanged("clip-black");
+        }
+
+        public void SetChromaKeyClipWhiteEnabled(bool enabled)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithClipWhiteEnabled(enabled);
+            NotifyChromaKeyProcessingParametersChanged("clip-white");
+        }
+
+        public void SetChromaKeyDespillEnabled(bool enabled)
+        {
+            _chromaKeySettings = _chromaKeySettings.WithDespillEnabled(enabled);
+            NotifyChromaKeyProcessingParametersChanged("despill");
+        }
+
+        public void RequestChromaKeyColorExtraction()
+        {
+            VlcPlaybackBridge.RequestVideoSurfaceChromaKeyColorExtraction();
+        }
+
+        private void HandleChromaKeyColorExtracted(string payload)
+        {
+            string[] parts = (payload ?? string.Empty).Split('|');
+            ChromaKeySettings extracted = ChromaKeySettings.Default;
+            bool success = parts.Length == 2 &&
+                string.Equals(parts[0], "ok", StringComparison.Ordinal) &&
+                ChromaKeySettings.TryParseHex(parts[1], out extracted);
+            if (success)
+            {
+                SetChromaKeyColor(extracted.KeyColor);
+            }
+            else
+            {
+                Debug.LogWarning($"[PlaybackService] Chroma key color extraction failed: {payload}");
+            }
+            OnChromaKeyColorExtractionCompleted?.Invoke(success);
+        }
+
+        private void NotifyChromaKeyProcessingParametersChanged(string reason)
+        {
+            OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings);
+            ApplyVideoSurfaceProcessingParameters();
+            SurfaceDebug(
+                $"chroma_key_parameters reason={reason} key={_chromaKeySettings.ToHex()} " +
+                $"range={_chromaKeySettings.ColorRange:F3} falloff={_chromaKeySettings.Falloff:F3} " +
+                $"edgeSmooth={_chromaKeySettings.EdgeSmoothEnabled} " +
+                $"clipBlack={_chromaKeySettings.ClipBlackEnabled} " +
+                $"clipWhite={_chromaKeySettings.ClipWhiteEnabled} despill={_chromaKeySettings.DespillEnabled} " +
+                "surfaceRebuild=false");
+        }
+
+        private void ApplyVideoSurfaceProcessingParameters()
+        {
+            VlcPlaybackBridge.SetVideoSurfaceProcessingParameters(
+                _fisheyeProjectionFormula,
+                _chromaKeySettings.KeyColor,
+                _chromaKeySettings.ColorRange,
+                _chromaKeySettings.Falloff,
+                _chromaKeySettings.EdgeSmoothEnabled,
+                _chromaKeySettings.ClipBlackEnabled,
+                _chromaKeySettings.ClipWhiteEnabled,
+                _chromaKeySettings.DespillEnabled);
         }
 
         public void Next(bool forceUserAction = true)
@@ -1076,9 +1450,44 @@ namespace XRVLC.Media
             return true;
         }
 
-        private bool ShouldRebuildVideoSurface(VideoSurfaceSpec spec)
+        private VideoOutputRebindKind GetVideoOutputRebindKind(VideoSurfaceSpec next, long mediaRequestId)
         {
-            return !IsVideoSurfaceCurrent(spec);
+            // A newly preloaded media is always a full output transaction, even when
+            // the dimensions happen to match the previous item.
+            if (mediaRequestId > 0L || !_videoSurfaceBoundToVlc || !_boundVideoSurfaceSpec.HasValue)
+                return VideoOutputRebindKind.RebuildLayer;
+
+            VideoSurfaceSpec previous = _boundVideoSurfaceSpec.Value;
+            if (previous.Equals(next))
+                return VideoOutputRebindKind.GeometryOnly;
+
+            bool sameLayerInputs = previous.ContentWidth == next.ContentWidth
+                && previous.ContentHeight == next.ContentHeight
+                && previous.Stereo == next.Stereo
+                && previous.HardwareDecoding == next.HardwareDecoding
+                && previous.ChromaKeyEnabled == next.ChromaKeyEnabled;
+            if (!sameLayerInputs)
+                return VideoOutputRebindKind.RebuildLayer;
+
+            if (IsSphere180To360Pair(previous.Projection, next.Projection))
+                return VideoOutputRebindKind.GeometryOnly;
+
+            if (IsSphere180FisheyePair(previous.Projection, next.Projection))
+                return VideoOutputRebindKind.ReuseLayer;
+
+            return VideoOutputRebindKind.RebuildLayer;
+        }
+
+        private static bool IsSphere180To360Pair(VideoProjection first, VideoProjection second)
+        {
+            return (first == VideoProjection.Sphere180 && second == VideoProjection.Sphere360)
+                || (first == VideoProjection.Sphere360 && second == VideoProjection.Sphere180);
+        }
+
+        private static bool IsSphere180FisheyePair(VideoProjection first, VideoProjection second)
+        {
+            return (first == VideoProjection.Sphere180 && second == VideoProjection.Fisheye180)
+                || (first == VideoProjection.Fisheye180 && second == VideoProjection.Sphere180);
         }
 
         private bool IsVideoSurfaceCurrent(VideoSurfaceSpec spec)
@@ -1105,7 +1514,8 @@ namespace XRVLC.Media
                 geometry.Projection,
                 geometry.Stereo,
                 geometry.CurveMode,
-                UseHardwareDecoding);
+                UseHardwareDecoding,
+                _chromaKeySettings.Enabled);
         }
 
         private void DisableAndDetachSubtitleSurface(bool destroyLayer)
@@ -1128,7 +1538,8 @@ namespace XRVLC.Media
         {
             return a.Projection == b.Projection
                 && a.Stereo == b.Stereo
-                && a.CurveMode == b.CurveMode;
+                && a.CurveMode == b.CurveMode
+                && a.FisheyeProjectionFormula == b.FisheyeProjectionFormula;
         }
 
         private static bool UsesFlatSubtitleSurfaceMode(SubtitleRenderMode mode)
@@ -1152,7 +1563,22 @@ namespace XRVLC.Media
 
         private static bool IsImmersiveProjection(VideoProjection projection)
         {
-            return projection == VideoProjection.Sphere360 || projection == VideoProjection.Sphere180;
+            return projection == VideoProjection.Sphere360 ||
+                projection == VideoProjection.Sphere180 ||
+                projection == VideoProjection.Fisheye180;
+        }
+
+        private static bool IsFisheyeProjection(VideoProjection projection)
+        {
+            return projection == VideoProjection.Fisheye180;
+        }
+
+        private void DetachVideoSurfaceFromVlc()
+        {
+            VlcPlaybackBridge.DetachSurface();
+            VlcPlaybackBridge.SetVideoSurfaceMapping(false, false, StereoMode.Mono, 0, 0);
+            _videoSurfaceBoundToVlc = false;
+            _boundVideoSurfaceSpec = null;
         }
 
         public void SetRenderSubtitlesOutsideScreen(bool enabled)
@@ -1262,7 +1688,8 @@ namespace XRVLC.Media
                 VideoProjection projection,
                 StereoMode stereo,
                 FlatVideoCurveMode curveMode,
-                bool hardwareDecoding)
+                bool hardwareDecoding,
+                bool chromaKeyEnabled)
             {
                 ContentWidth = contentWidth;
                 ContentHeight = contentHeight;
@@ -1270,6 +1697,7 @@ namespace XRVLC.Media
                 Stereo = stereo;
                 CurveMode = curveMode;
                 HardwareDecoding = hardwareDecoding;
+                ChromaKeyEnabled = chromaKeyEnabled;
             }
 
             public uint ContentWidth { get; }
@@ -1278,6 +1706,7 @@ namespace XRVLC.Media
             public StereoMode Stereo { get; }
             public FlatVideoCurveMode CurveMode { get; }
             public bool HardwareDecoding { get; }
+            public bool ChromaKeyEnabled { get; }
 
             public bool Equals(VideoSurfaceSpec other)
             {
@@ -1286,7 +1715,8 @@ namespace XRVLC.Media
                     && Projection == other.Projection
                     && Stereo == other.Stereo
                     && CurveMode == other.CurveMode
-                    && HardwareDecoding == other.HardwareDecoding;
+                    && HardwareDecoding == other.HardwareDecoding
+                    && ChromaKeyEnabled == other.ChromaKeyEnabled;
             }
         }
 

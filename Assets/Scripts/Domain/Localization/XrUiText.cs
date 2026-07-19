@@ -56,6 +56,7 @@ namespace XRVLC.Localization
         public const string GeometryCurve = "geometry.section.curve";
         public const string GeometryProjection180 = "geometry.projection.180";
         public const string GeometryProjection360 = "geometry.projection.360";
+        public const string GeometryProjectionFisheye = "geometry.projection.fisheye";
         public const string GeometryProjectionFlat = "geometry.projection.flat";
         public const string GeometryStereoMono = "geometry.stereo.mono";
         public const string GeometryStereoTopBottom = "geometry.stereo.top_bottom";
@@ -63,6 +64,22 @@ namespace XRVLC.Localization
         public const string GeometryCurveNone = "geometry.curve.none";
         public const string GeometryCurveSmall = "geometry.curve.small";
         public const string GeometryCurveLarge = "geometry.curve.large";
+        public const string GeometryFisheyeFormula = "geometry.section.fisheye_formula";
+        public const string GeometryFisheyeEquidistant = "geometry.fisheye.equidistant";
+        public const string GeometryFisheyeEquisolid = "geometry.fisheye.equisolid";
+        public const string GeometryFisheyeStereographic = "geometry.fisheye.stereographic";
+        public const string GeometryFisheyeOrthographic = "geometry.fisheye.orthographic";
+
+        public const string ChromaKeyEnabled = "chromakey.enabled";
+        public const string ChromaKeyColor = "chromakey.key_color";
+        public const string ChromaKeyHex = "chromakey.hex";
+        public const string ChromaKeyColorRange = "chromakey.color_range";
+        public const string ChromaKeyFalloff = "chromakey.falloff";
+        public const string ChromaKeyExtractColor = "chromakey.extract_color";
+        public const string ChromaKeyEdgeSmooth = "chromakey.edge_smooth";
+        public const string ChromaKeyClipBlack = "chromakey.clip_black";
+        public const string ChromaKeyClipWhite = "chromakey.clip_white";
+        public const string ChromaKeyDespill = "chromakey.despill";
     }
 
     public static class XrUiText
@@ -128,13 +145,30 @@ namespace XRVLC.Localization
             [XrUiTextKey.GeometryCurve] = "Flat curve",
             [XrUiTextKey.GeometryProjection180] = "180 panorama",
             [XrUiTextKey.GeometryProjection360] = "360 panorama",
+            [XrUiTextKey.GeometryProjectionFisheye] = "Fisheye 180",
             [XrUiTextKey.GeometryProjectionFlat] = "Flat",
             [XrUiTextKey.GeometryStereoMono] = "No 3D",
             [XrUiTextKey.GeometryStereoTopBottom] = "Top-bottom 3D",
             [XrUiTextKey.GeometryStereoLeftRight] = "Left-right 3D",
             [XrUiTextKey.GeometryCurveNone] = "No curve",
             [XrUiTextKey.GeometryCurveSmall] = "Small curve",
-            [XrUiTextKey.GeometryCurveLarge] = "Large curve"
+            [XrUiTextKey.GeometryCurveLarge] = "Large curve",
+            [XrUiTextKey.GeometryFisheyeFormula] = "Fisheye formula",
+            [XrUiTextKey.GeometryFisheyeEquidistant] = "Equidistant",
+            [XrUiTextKey.GeometryFisheyeEquisolid] = "Equisolid angle",
+            [XrUiTextKey.GeometryFisheyeStereographic] = "Stereographic",
+            [XrUiTextKey.GeometryFisheyeOrthographic] = "Orthographic",
+
+            [XrUiTextKey.ChromaKeyEnabled] = "Transparency",
+            [XrUiTextKey.ChromaKeyColor] = "Key color",
+            [XrUiTextKey.ChromaKeyHex] = "Hex",
+            [XrUiTextKey.ChromaKeyColorRange] = "Color Range",
+            [XrUiTextKey.ChromaKeyFalloff] = "Falloff",
+            [XrUiTextKey.ChromaKeyExtractColor] = "Extract Key Color",
+            [XrUiTextKey.ChromaKeyEdgeSmooth] = "Edge Smooth",
+            [XrUiTextKey.ChromaKeyClipBlack] = "Clip Black",
+            [XrUiTextKey.ChromaKeyClipWhite] = "Clip White",
+            [XrUiTextKey.ChromaKeyDespill] = "Despill"
         };
 
         private static readonly Dictionary<string, string> ZhHans = new Dictionary<string, string>
@@ -193,13 +227,30 @@ namespace XRVLC.Localization
             [XrUiTextKey.GeometryCurve] = "平面弧度",
             [XrUiTextKey.GeometryProjection180] = "180全景",
             [XrUiTextKey.GeometryProjection360] = "360全景",
+            [XrUiTextKey.GeometryProjectionFisheye] = "鱼眼180",
             [XrUiTextKey.GeometryProjectionFlat] = "平面",
             [XrUiTextKey.GeometryStereoMono] = "无3D",
             [XrUiTextKey.GeometryStereoTopBottom] = "上下3D",
             [XrUiTextKey.GeometryStereoLeftRight] = "左右3D",
             [XrUiTextKey.GeometryCurveNone] = "无曲面",
             [XrUiTextKey.GeometryCurveSmall] = "小曲面",
-            [XrUiTextKey.GeometryCurveLarge] = "大曲面"
+            [XrUiTextKey.GeometryCurveLarge] = "大曲面",
+            [XrUiTextKey.GeometryFisheyeFormula] = "鱼眼公式",
+            [XrUiTextKey.GeometryFisheyeEquidistant] = "等距",
+            [XrUiTextKey.GeometryFisheyeEquisolid] = "等立体角",
+            [XrUiTextKey.GeometryFisheyeStereographic] = "立体投影",
+            [XrUiTextKey.GeometryFisheyeOrthographic] = "正交投影",
+
+            [XrUiTextKey.ChromaKeyEnabled] = "透明模式",
+            [XrUiTextKey.ChromaKeyColor] = "键色",
+            [XrUiTextKey.ChromaKeyHex] = "Hex",
+            [XrUiTextKey.ChromaKeyColorRange] = "颜色范围",
+            [XrUiTextKey.ChromaKeyFalloff] = "边缘过渡",
+            [XrUiTextKey.ChromaKeyExtractColor] = "提取主色",
+            [XrUiTextKey.ChromaKeyEdgeSmooth] = "边缘平滑",
+            [XrUiTextKey.ChromaKeyClipBlack] = "黑场裁剪",
+            [XrUiTextKey.ChromaKeyClipWhite] = "白场裁剪",
+            [XrUiTextKey.ChromaKeyDespill] = "去溢色"
         };
 
         private static readonly Dictionary<string, string> ZhHantOverrides = new Dictionary<string, string>();

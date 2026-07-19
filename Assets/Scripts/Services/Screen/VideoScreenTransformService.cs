@@ -76,7 +76,7 @@ namespace XRVLC
             if (projection == VideoProjection.Sphere360)
                 return;
 
-            if (projection != VideoProjection.Sphere180)
+            if (projection != VideoProjection.Sphere180 && projection != VideoProjection.Fisheye180)
                 return;
 
             if (!TryNormalizeDirection(target.forward, out Vector3 sphereCenterToScreenCenter))
@@ -191,7 +191,9 @@ namespace XRVLC
         private bool IsImmersive()
         {
             VideoProjection projection = GetCurrentProjection();
-            return projection == VideoProjection.Sphere360 || projection == VideoProjection.Sphere180;
+            return projection == VideoProjection.Sphere360 ||
+                projection == VideoProjection.Sphere180 ||
+                projection == VideoProjection.Fisheye180;
         }
 
         private VideoProjection GetCurrentProjection()

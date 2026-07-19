@@ -38,7 +38,8 @@ namespace XRVLC.Tests
             "info",
             "sphere",
             "stereo3d",
-            "vr-glasses"
+            "vr-glasses",
+            "eyes"
         };
 
         [Test]
@@ -1729,6 +1730,7 @@ namespace XRVLC.Tests
                 Assert.Greater(GetButtonAlpha(geometryMenu, "无3D"), 0f);
                 Assert.Greater(GetButtonAlpha(geometryMenu, "无曲面"), 0f);
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "360全景"));
+                Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "鱼眼180"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "上下3D"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "大曲面"));
 
@@ -1743,8 +1745,15 @@ namespace XRVLC.Tests
                 Assert.Greater(GetButtonAlpha(geometryMenu, "上下3D"), 0f);
                 Assert.Greater(GetButtonAlpha(geometryMenu, "大曲面"), 0f);
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "平面"));
+                Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "鱼眼180"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "无3D"));
                 Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "无曲面"));
+
+                managerType.GetMethod("SetGeometryProjection", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .Invoke(manager, new object[] { XRVLC.VideoProjection.Fisheye180 });
+
+                Assert.Greater(GetButtonAlpha(geometryMenu, "鱼眼180"), 0f);
+                Assert.AreEqual(0f, GetButtonAlpha(geometryMenu, "360全景"));
             }
             finally
             {

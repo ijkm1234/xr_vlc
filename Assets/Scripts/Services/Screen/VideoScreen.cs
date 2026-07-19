@@ -43,7 +43,9 @@ namespace XRVLC
         public VideoProjection CurrentProjection => _currentProjection;
         public float FlatZoomScale => _flatZoomScale;
         public bool IsImmersiveProjection =>
-            _currentProjection == VideoProjection.Sphere360 || _currentProjection == VideoProjection.Sphere180;
+            _currentProjection == VideoProjection.Sphere360 ||
+            _currentProjection == VideoProjection.Sphere180 ||
+            _currentProjection == VideoProjection.Fisheye180;
         public float SubtitleAnchorSurfaceOffsetMeters =>
             _currentProjection == VideoProjection.Cylinder ? GetCurrentCylinderVisualRadius() : 0f;
         public Vector2 SubtitleReferenceSizeMeters
@@ -122,13 +124,14 @@ namespace XRVLC
         /// </summary>
         public void RebuildLayer(bool asHardwareSurface, uint videoWidth = 0, uint videoHeight = 0,
                                  VideoProjection proj = VideoProjection.Flat, StereoMode stereo = StereoMode.Mono,
-                                 FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
+                                 FlatVideoCurveMode curveMode = FlatVideoCurveMode.None,
+                                 bool useTextureAlphaBlending = false)
         {
             if (_renderSurface != null)
             {
                 // 先清理可能存在的旧的缩放状态，避免干扰底层的计算
                 videoAnchor.localScale = Vector3.one;
-                _renderSurface.RebuildLayer(asHardwareSurface, videoWidth, videoHeight, proj, stereo, curveMode);
+                _renderSurface.RebuildLayer(asHardwareSurface, videoWidth, videoHeight, proj, stereo, curveMode, useTextureAlphaBlending);
             }
         }
 
@@ -153,7 +156,8 @@ namespace XRVLC
             _lastBackgroundRatio = backgroundRatio;
 
             if (_currentProjection == VideoProjection.Sphere360 ||
-                _currentProjection == VideoProjection.Sphere180)
+                _currentProjection == VideoProjection.Sphere180 ||
+                _currentProjection == VideoProjection.Fisheye180)
             {
                 videoAnchor.localScale = Vector3.one;
                 RefreshFlatSubtitleLayerGeometry();
@@ -258,7 +262,8 @@ namespace XRVLC
         public void ApplyFlatZoomDelta(float distanceDeltaMeters)
         {
             if (_currentProjection == VideoProjection.Sphere360 ||
-                _currentProjection == VideoProjection.Sphere180)
+                _currentProjection == VideoProjection.Sphere180 ||
+                _currentProjection == VideoProjection.Fisheye180)
                 return;
 
             float minZoom = Mathf.Min(minFlatZoomScale, maxFlatZoomScale);
@@ -291,6 +296,7 @@ namespace XRVLC
                     break;
                 case VideoProjection.Sphere360:
                 case VideoProjection.Sphere180:
+                case VideoProjection.Fisheye180:
                     SetupImmersiveMode();
                     break;
             }
@@ -752,7 +758,8 @@ namespace XRVLC
         public void ResetTransformToDefault()
         {
             if (_currentProjection == VideoProjection.Sphere360 ||
-                _currentProjection == VideoProjection.Sphere180)
+                _currentProjection == VideoProjection.Sphere180 ||
+                _currentProjection == VideoProjection.Fisheye180)
             {
                 RecenterImmersiveSphere();
                 return;

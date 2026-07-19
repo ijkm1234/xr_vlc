@@ -4,8 +4,6 @@ using XRVLC.Media;
 
 public static class VlcPlaybackEvents
 {
-    public static VlcPlaybackSnapshot Snapshot => VlcPlaybackBridge.Snapshot;
-
     public static event Action<VlcVideoSize> OnVideoSizeChanged
     {
         add => VlcPlaybackBridge.OnVideoSizeChangedEvent += value;
@@ -42,6 +40,12 @@ public static class VlcPlaybackEvents
         remove => VlcPlaybackBridge.OnBufferingEvent -= value;
     }
 
+    public static event Action<string> OnChromaKeyColorExtracted
+    {
+        add => VlcPlaybackBridge.OnChromaKeyColorExtractedEvent += value;
+        remove => VlcPlaybackBridge.OnChromaKeyColorExtractedEvent -= value;
+    }
+
     public static event Action OnClearPlaybackSurface
     {
         add => VlcPlaybackBridge.ClearPlaybackSurfaceEvent += value;
@@ -70,5 +74,11 @@ public static class VlcPlaybackEvents
     {
         add => VlcPlaybackBridge.OnMediaParseFinishedEvent += value;
         remove => VlcPlaybackBridge.OnMediaParseFinishedEvent -= value;
+    }
+
+    public static event Action<string> OnVideoOutputSwitch
+    {
+        add => VlcPlaybackBridge.OnVideoOutputSwitchEventReceived += value;
+        remove => VlcPlaybackBridge.OnVideoOutputSwitchEventReceived -= value;
     }
 }

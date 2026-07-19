@@ -58,6 +58,14 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void Detect_FisheyeInFilename_ReturnsFisheye180()
+        {
+            var (proj, stereo) = ProjectionDetector.Detect(Media("/sdcard/Movies/concert_fisheye_lr.mp4"));
+            Assert.AreEqual(VideoProjection.Fisheye180, proj);
+            Assert.AreEqual(StereoMode.LeftRight, stereo);
+        }
+
+        [Test]
         public void Detect_EquirectInFilename_ReturnsSphere360()
         {
             var (proj, _) = ProjectionDetector.Detect(Media("equirectangular_clip.mp4"));

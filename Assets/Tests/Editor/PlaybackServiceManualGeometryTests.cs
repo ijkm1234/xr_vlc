@@ -199,7 +199,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("private VlcVideoSize CurrentVideoSize", playbackSource);
             StringAssert.Contains("CurrentVideoSize.ContentWidth", playbackSource);
             StringAssert.Contains("CurrentVideoSize.ContentHeight", playbackSource);
-            StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize)", geometrySource);
+            StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize, bool useTextureAlphaBlending)", geometrySource);
             StringAssert.Contains("uint contentWidth = (uint)videoSize.ContentWidth", rebuildMethod);
             StringAssert.Contains("uint contentHeight = (uint)videoSize.ContentHeight", rebuildMethod);
             StringAssert.Contains("RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, contentWidth, contentHeight", rebuildMethod);
@@ -387,7 +387,7 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("bool shouldRebuildVideoSurface = ShouldRebuildVideoSurface(videoSpec)", rebuildMethod);
             StringAssert.Contains("if (shouldRebuildVideoSurface)", rebuildMethod);
-            StringAssert.Contains("_geometryService.Rebuild(videoSize);", rebuildMethod);
+            StringAssert.Contains("_geometryService.Rebuild(videoSize, videoSpec.ChromaKeyEnabled);", rebuildMethod);
             StringAssert.Contains("BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec", rebuildMethod);
             StringAssert.Contains("WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface)", rebuildMethod);
             StringAssert.Contains("BindVideoSurface(videoSpec)", rebuildMethod);
@@ -405,7 +405,7 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("BindVideoSurface", subtitleBindingRoutine);
             StringAssert.DoesNotContain("SetSurface", subtitleBindingRoutine);
 
-            StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize)", geometrySource);
+            StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize, bool useTextureAlphaBlending)", geometrySource);
             StringAssert.DoesNotContain("VlcPlaybackBridge.SetSurface", geometrySource);
             StringAssert.DoesNotContain("VlcPlaybackBridge.DetachSurface", geometrySource);
         }
@@ -426,6 +426,79 @@ namespace XRVLC.Tests
             StringAssert.Contains("VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside())", setterMethod);
             StringAssert.DoesNotContain("VlcPlaybackBridge.SetSubtitleSurfacePolicy(RenderSubtitlesOutsideScreen)", source);
             StringAssert.DoesNotContain("VlcPlaybackBridge.SetSubtitleSurfacePolicy(enabled)", source);
+        }
+
+        [Test]
+        public void PlaybackService_EnablesSurfaceMapperForFisheyeOrChromaKey()
+        {
+            string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
+            string source = File.ReadAllText(path);
+            string bindVideoMethod = ExtractMethod(source, "BindVideoSurface", "private void");
+            string detachVideoMethod = ExtractMethod(source, "DetachVideoSurfaceFromVlc", "private void");
+
+            StringAssert.Contains("bool fisheyeMappingEnabled = videoSpec.Projection == VideoProjection.Fisheye180", bindVideoMethod);
+            StringAssert.Contains("VlcPlaybackBridge.SetVideoSurfaceMapping(", bindVideoMethod);
+            StringAssert.Contains("fisheyeMappingEnabled", bindVideoMethod);
+            StringAssert.Contains("videoSpec.ChromaKeyEnabled", bindVideoMethod);
+            Assert.Less(
+                bindVideoMethod.IndexOf("VlcPlaybackBridge.SetVideoSurfaceMapping(", System.StringComparison.Ordinal),
+                bindVideoMethod.IndexOf("VlcPlaybackBridge.SetSurface(videoSurfacePtr)", System.StringComparison.Ordinal),
+                "Mapping must be configured before the output Surface is handed to Android.");
+
+            StringAssert.Contains("private static bool IsFisheyeProjection(VideoProjection projection)", source);
+            StringAssert.Contains("DetachVideoSurfaceFromVlc()", source);
+            StringAssert.Contains("VlcPlaybackBridge.SetVideoSurfaceMapping(false, false, StereoMode.Mono, 0, 0)", detachVideoMethod);
+        }
+
+        [Test]
+        public void PlaybackService_UsesManualChromaKeyForAllMediaAndResetsItOnMediaChange()
+        {
+            string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
+            string source = File.ReadAllText(path);
+            string createSpecMethod = ExtractMethod(source, "CreateVideoSurfaceSpec", "private VideoSurfaceSpec");
+            string loadAndPlayMethod = ExtractMethod(source, "LoadAndPlay", "public void");
+            string setEnabledMethod = ExtractMethod(source, "SetChromaKeyEnabled", "public void");
+
+            StringAssert.Contains("_chromaKeySettings.Enabled", createSpecMethod);
+            StringAssert.Contains("_chromaKeySettings = ChromaKeySettings.Default", loadAndPlayMethod);
+            StringAssert.Contains("OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings)", loadAndPlayMethod);
+            StringAssert.Contains("_chromaKeySettings.WithEnabled(enabled)", setEnabledMethod);
+            StringAssert.DoesNotContain("ShouldEnableChromaKey", source);
+            StringAssert.DoesNotContain("Path.GetFileName", source);
+            StringAssert.Contains("ChromaKeyEnabled = chromaKeyEnabled", source);
+            StringAssert.Contains("public bool ChromaKeyEnabled { get; }", source);
+            StringAssert.Contains("ChromaKeyEnabled == other.ChromaKeyEnabled", source);
+        }
+
+        [Test]
+        public void VideoSurface_RebuildPassesStraightAlphaBlendingToPico()
+        {
+            string renderSurfaceSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Screen/IRenderSurface.cs"));
+            string videoScreenSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreen.cs"));
+            string geometrySource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreenGeometryService.cs"));
+            string picoSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Infrastructure/Rendering/PicoRenderSurface.cs"));
+
+            StringAssert.Contains("bool useTextureAlphaBlending", renderSurfaceSource);
+            StringAssert.Contains("bool useTextureAlphaBlending", videoScreenSource);
+            StringAssert.Contains("curveMode, useTextureAlphaBlending", videoScreenSource);
+            StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize, bool useTextureAlphaBlending)", geometrySource);
+            StringAssert.Contains("geometry.CurveMode, useTextureAlphaBlending", geometrySource);
+            StringAssert.Contains("bool useTextureAlphaBlending", picoSource);
+            StringAssert.Contains("_compLayer.useTextureAlphaBlending = useTextureAlphaBlending", picoSource);
+            StringAssert.Contains("_compLayer.usePremultipliedAlpha = false", picoSource);
+        }
+
+        [Test]
+        public void PicoRenderSurface_LogsSdkSelectedCompositionLayerColorFormat()
+        {
+            string picoSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Infrastructure/Rendering/PicoRenderSurface.cs"));
+
+            StringAssert.Contains("DescribeCompositionLayerColorFormat", picoSource);
+            StringAssert.Contains("overlayParam", picoSource);
+            StringAssert.Contains("BindingFlags.Instance", picoSource);
+            StringAssert.Contains("compositionColorFormat=", picoSource);
+            StringAssert.Contains("SystemInfo.graphicsDeviceType", picoSource);
+            StringAssert.Contains("QualitySettings.activeColorSpace", picoSource);
         }
 
         [Test]

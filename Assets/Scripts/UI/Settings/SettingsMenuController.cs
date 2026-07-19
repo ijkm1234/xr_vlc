@@ -28,11 +28,9 @@ public class SettingsMenuController : MonoBehaviour
     private static readonly Color SelectedButtonColor = new Color(1f, 1f, 1f, 0.24f);
     private static readonly Color HoverButtonColor = new Color(1f, 1f, 1f, 0.16f);
     private static readonly Color SelectedButtonHoverColor = new Color(1f, 1f, 1f, 0.32f);
-    private static readonly Color VlcOrange = new Color(1f, 0.53333336f, 0f, 1f);
-    private static readonly Color SwitchOffTrackColor = new Color(1f, 1f, 1f, 0.16f);
-    private static readonly Color SwitchBorderColor = new Color(1f, 1f, 1f, 0.22f);
     private static readonly Color TextColor = Color.white;
     private const string IconResourcePath = "UI/IconPark/";
+    private const string SettingsStyleSwitchResourcePath = "UI/SettingsStyleSwitch";
     private const string GestureInfoIconName = "info";
     private const string StepperControlResourcePath = "UI/XrStepperControl";
     private const string AudioChannelStereoValue = "stereo";
@@ -43,10 +41,6 @@ public class SettingsMenuController : MonoBehaviour
     private const float GestureInfoIconGap = 6f;
     private const float SwitchWidth = 76f;
     private const float SwitchHeight = 38f;
-    private const float SwitchKnobSize = 30f;
-    private const float SwitchTrackLength = SwitchWidth * 0.75f;
-    private const float SwitchTrackThickness = SwitchKnobSize * 0.5f;
-    private const float SwitchKnobTravel = (SwitchWidth - SwitchKnobSize) * 0.5f;
     private static readonly VideoAspectRatio[] VideoAspectRatioOptions =
     {
         VideoAspectRatio.Source,
@@ -411,38 +405,11 @@ public class SettingsMenuController : MonoBehaviour
         hitArea.color = Color.clear;
         hitArea.raycastTarget = true;
 
-        var trackObject = new GameObject("Track", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage));
-        trackObject.transform.SetParent(item.transform, false);
-
-        var trackRect = trackObject.GetComponent<RectTransform>();
-        trackRect.anchorMin = new Vector2(0.5f, 0.5f);
-        trackRect.anchorMax = new Vector2(0.5f, 0.5f);
-        trackRect.pivot = new Vector2(0.5f, 0.5f);
-        trackRect.sizeDelta = new Vector2(SwitchTrackLength, SwitchTrackThickness);
-        trackRect.anchoredPosition = Vector2.zero;
-        trackRect.SetAsFirstSibling();
-
-        var track = trackObject.GetComponent<RoundedRectImage>();
-        track.cornerRadius = SwitchTrackThickness * 0.5f;
-        track.borderWidth = 1f;
-        track.borderColor = SwitchBorderColor;
-        track.color = SwitchOffTrackColor;
-        track.raycastTarget = false;
-
-        var knobObject = new GameObject("Knob", typeof(RectTransform), typeof(CanvasRenderer), typeof(RoundedRectImage));
-        knobObject.transform.SetParent(item.transform, false);
-
-        var knobRect = knobObject.GetComponent<RectTransform>();
-        knobRect.anchorMin = new Vector2(0.5f, 0.5f);
-        knobRect.anchorMax = new Vector2(0.5f, 0.5f);
-        knobRect.pivot = new Vector2(0.5f, 0.5f);
-        knobRect.sizeDelta = new Vector2(SwitchKnobSize, SwitchKnobSize);
-        knobRect.anchoredPosition = new Vector2(-SwitchKnobTravel, 0f);
-
-        var knob = knobObject.GetComponent<RoundedRectImage>();
-        knob.cornerRadius = SwitchKnobSize * 0.5f;
-        knob.color = VlcOrange;
-        knob.raycastTarget = false;
+        SettingsStyleSwitch switchPrefab = Resources.Load<SettingsStyleSwitch>(SettingsStyleSwitchResourcePath);
+        if (switchPrefab != null)
+            Instantiate(switchPrefab, item.transform, false).name = "SettingsStyleSwitch";
+        else
+            Debug.LogError("[SettingsMenu] SettingsStyleSwitch prefab is missing.");
 
         Button button = item.GetComponent<Button>();
         button.transition = Selectable.Transition.None;
@@ -1000,7 +967,7 @@ public class SettingsMenuController : MonoBehaviour
 
     private void StepPlaybackRate(float delta)
     {
-        float current = _playbackService != null ? VlcPlaybackEvents.Snapshot.PlaybackRate : 1f;
+        float current = _playbackService != null ? VlcPlaybackBridge.GetPlaybackRate() : 1f;
         ApplyPlaybackRate(Mathf.Max(0.25f, SnapToStep(current + delta, 0.25f)));
     }
 
@@ -1096,7 +1063,7 @@ public class SettingsMenuController : MonoBehaviour
     private void UpdatePlaybackRateControl()
     {
         if (_playbackRateStepper != null)
-            _playbackRateStepper.SetValueWithoutNotify(FormatRate(VlcPlaybackEvents.Snapshot.PlaybackRate));
+            _playbackRateStepper.SetValueWithoutNotify(FormatRate(VlcPlaybackBridge.GetPlaybackRate()));
     }
 
     private void UpdateSeekSecondsControl()
@@ -1114,18 +1081,8 @@ public class SettingsMenuController : MonoBehaviour
     {
         if (button == null) return;
 
-        Transform trackTransform = button.transform.Find("Track");
-        RoundedRectImage track = trackTransform != null ? trackTransform.GetComponent<RoundedRectImage>() : null;
-        if (track != null)
-        {
-            track.color = enabled ? VlcOrange : SwitchOffTrackColor;
-            track.borderColor = enabled ? VlcOrange : SwitchBorderColor;
-            track.SetVerticesDirty();
-        }
-
-        RectTransform knob = button.transform.Find("Knob") as RectTransform;
-        if (knob != null)
-            knob.anchoredPosition = new Vector2(enabled ? SwitchKnobTravel : -SwitchKnobTravel, 0f);
+        SettingsStyleSwitch switchVisual = button.GetComponentInChildren<SettingsStyleSwitch>(true);
+        switchVisual?.SetState(enabled);
     }
 
     private void UpdateVideoLayoutSelection()

@@ -351,18 +351,20 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void GeometryMenuProjectionButtonsPutFlatFirstAndNameMonoAsNo3D()
+        public void GeometryMenuProjectionButtonsPutFlatFirstAndIncludeFisheye180()
         {
             string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
-            int flatIndex = vr.IndexOf("_projectionFlatButton = CreateGeometryOptionButton(projectionRow, \"平面\"", System.StringComparison.Ordinal);
-            int sphere180Index = vr.IndexOf("_projection180Button = CreateGeometryOptionButton(projectionRow, \"180全景\"", System.StringComparison.Ordinal);
-            int sphere360Index = vr.IndexOf("_projection360Button = CreateGeometryOptionButton(projectionRow, \"360全景\"", System.StringComparison.Ordinal);
+            int flatIndex = vr.IndexOf("_projectionFlatButton = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjectionFlat)", System.StringComparison.Ordinal);
+            int sphere180Index = vr.IndexOf("_projection180Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection180)", System.StringComparison.Ordinal);
+            int sphere360Index = vr.IndexOf("_projection360Button = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjection360)", System.StringComparison.Ordinal);
+            int fisheyeIndex = vr.IndexOf("_projectionFisheyeButton = CreateGeometryOptionButton(projectionRow, XrUiText.Get(XrUiTextKey.GeometryProjectionFisheye)", System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(flatIndex, 0);
             Assert.Greater(sphere180Index, flatIndex);
             Assert.Greater(sphere360Index, sphere180Index);
+            Assert.Greater(fisheyeIndex, sphere360Index);
 
-            StringAssert.Contains("_stereoMonoButton = CreateGeometryOptionButton(stereoRow, \"无3D\"", vr);
+            StringAssert.Contains("_stereoMonoButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoMono)", vr);
             StringAssert.DoesNotContain("平面左右眼划分", vr);
         }
 

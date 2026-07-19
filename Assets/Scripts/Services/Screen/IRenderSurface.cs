@@ -15,7 +15,8 @@ namespace XRVLC
         /// </summary>
         void RebuildLayer(bool asHardwareSurface, uint videoWidth = 0, uint videoHeight = 0,
                           VideoProjection proj = VideoProjection.Flat, StereoMode stereo = StereoMode.Mono,
-                          FlatVideoCurveMode curveMode = FlatVideoCurveMode.None);
+                          FlatVideoCurveMode curveMode = FlatVideoCurveMode.None,
+                          bool useTextureAlphaBlending = false);
 
         /// <summary>
         /// 用于 VR 视频：改变底层的几何体形状和 3D 分屏模式
