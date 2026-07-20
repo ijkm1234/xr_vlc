@@ -5,7 +5,6 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 vlc_root="$project_root/vlc-android"
 local_properties="$vlc_root/local.properties"
 native_gradle_version="8.6"
-aar_gradle_version="8.13"
 
 read_property() {
     sed -n "s/^$1=//p" "$local_properties" | head -n 1
@@ -44,25 +43,19 @@ export ANDROID_SDK="$android_sdk"
 export ANDROID_NDK="$android_ndk"
 
 cd "$vlc_root"
-./buildsystem/compile.sh -a arm64-v8a -l -b
+SKIP_LIBVLC_GRADLE_BUILD=1 ./buildsystem/compile.sh -a arm64-v8a -l -b
 
-# compile.sh regenerates its wrapper for the Gradle 8.6 native build. The
-# libvlcjni Android Gradle Plugin requires Gradle 8.13 for the AAR packaging
-# phase, so switch only the generated wrapper distribution before invoking it.
-wrapper_properties="$vlc_root/gradle/wrapper/gradle-wrapper.properties"
-if [[ ! -f "$wrapper_properties" ]]; then
-    echo "Missing Gradle wrapper properties after native compilation." >&2
-    exit 1
-fi
-perl -0pi -e "s|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-${aar_gradle_version}-bin.zip|" "$wrapper_properties"
+# Package from the outer project. Its Gradle 8.6 / AGP 8.3.2 configuration
+# also includes the freshly built libvlcjni native libraries in the fat AAR.
 GRADLE_ABI=arm64-v8a ./gradlew \
     :application:vlc-android:clean \
     :application:vlc-android:assembleDebug
 
 aar_source="$vlc_root/application/vlc-android/build/outputs/aar/vlc-android-debug.aar"
 aar_target="$project_root/Assets/Plugins/Android/vlc-android-debug.aar"
+aar_entries="$(unzip -Z1 "$aar_source")"
 for native_lib in libvlc.so libvlcjni.so libc++_shared.so; do
-    unzip -l "$aar_source" | grep -q "jni/arm64-v8a/$native_lib" || {
+    grep -Fqx "jni/arm64-v8a/$native_lib" <<<"$aar_entries" || {
         echo "Missing $native_lib in $aar_source" >&2
         exit 1
     }

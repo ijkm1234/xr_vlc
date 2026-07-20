@@ -78,6 +78,13 @@ namespace XRVLC.Media
         private VlcVideoSize CurrentVideoSize =>
             new VlcVideoSize(_currentWidth, _currentHeight, _currentVisibleWidth, _currentVisibleHeight);
 
+        public bool IsChromaKeyColorExtractionReady =>
+            _chromaKeySettings.Enabled
+            && _geometryBindingCoroutine == null
+            && _videoSurfaceBoundToVlc
+            && _boundVideoSurfaceSpec.HasValue
+            && _boundVideoSurfaceSpec.Value.ChromaKeyEnabled;
+
         private enum VideoOutputSwitchState
         {
             None,
@@ -454,7 +461,6 @@ namespace XRVLC.Media
                     videoSpec.Stereo,
                     videoSpec.CurveMode);
                 _boundVideoSurfaceSpec = videoSpec;
-                Play();
                 _geometryBindingCoroutine = null;
                 CompleteActivePlaybackRequest(mediaRequestId, "geometry-only");
                 yield break;
@@ -1066,7 +1072,6 @@ namespace XRVLC.Media
                 }
 
                 ApplyManualGeometryWithoutRebuild(projection, stereo, curveMode);
-                Play();
                 return;
             }
 
@@ -1098,7 +1103,6 @@ namespace XRVLC.Media
                 _manualGeometrySelection.FisheyeProjectionFormula = formula;
             ApplyVideoSurfaceProcessingParameters();
             SurfaceDebug($"fisheye_formula_update formula={formula} surfaceRebuild=false");
-            Play();
         }
 
         public void SetChromaKeyEnabled(bool enabled)

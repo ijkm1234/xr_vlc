@@ -1074,7 +1074,8 @@ public class SettingsMenuController : MonoBehaviour
 
     private void OnPlaybackRateChanged(float rate)
     {
-        UpdatePlaybackRateControl();
+        if (_playbackRateStepper != null)
+            _playbackRateStepper.SetValueWithoutNotify(FormatRate(rate));
     }
 
     private void SetSwitchButtonState(Button button, bool enabled)

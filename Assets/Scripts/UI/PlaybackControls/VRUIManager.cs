@@ -888,8 +888,7 @@ public class VRUIManager : MonoBehaviour
 
     private void OnBuffering(float buffering)
     {
-        // Loading visibility follows the real VLC state event. Buffer percentage
-        // alone is not a reliable transition to Playing.
+        SetLoadingVisible(buffering < 100f);
     }
 
     private static bool IsLoadingStatus(XRVLC.Media.PlayerStatus status)

@@ -1,18 +1,18 @@
 using System.Collections;
 using Unity.XR.CoreUtils;
-using Unity.XR.PXR;
 using UnityEngine;
 using UnityEngine.XR;
-using UnityEngine.XR.Management;
 using XRVLC.Infrastructure.Pico;
 
 [AddComponentMenu("XR/XR Recenter On Start")]
 [RequireComponent(typeof(XROrigin))]
 public class XRRecenterOnStart : MonoBehaviour
 {
+    const float TrackingWaitTimeoutSeconds = 3f;
+
     XROrigin m_XROrigin;
-    XRInputSubsystem m_Subsystem;
-    bool m_Recentered;
+    Coroutine m_StartupRecenterCoroutine;
+    bool m_StartupAlignmentFinished;
 
     void Awake()
     {
@@ -21,33 +21,67 @@ public class XRRecenterOnStart : MonoBehaviour
 
     void OnEnable()
     {
-        m_Subsystem = XRGeneralSettings.Instance?.Manager?.activeLoader
-            ?.GetLoadedSubsystem<XRInputSubsystem>();
-        if (m_Subsystem != null)
-            m_Subsystem.trackingOriginUpdated += OnTrackingOriginUpdated;
         PicoRecenterEvents.RecenterSuccess += OnSystemRecenter;
+
+        if (!m_StartupAlignmentFinished && m_StartupRecenterCoroutine == null)
+            m_StartupRecenterCoroutine = StartCoroutine(WaitForTrackingAndRecenter());
     }
 
     void OnDisable()
     {
-        if (m_Subsystem != null)
-            m_Subsystem.trackingOriginUpdated -= OnTrackingOriginUpdated;
         PicoRecenterEvents.RecenterSuccess -= OnSystemRecenter;
+
+        if (m_StartupRecenterCoroutine != null)
+        {
+            StopCoroutine(m_StartupRecenterCoroutine);
+            m_StartupRecenterCoroutine = null;
+        }
     }
 
-    // 启动时追踪模式切换完成，等一帧数据稳定后对齐朝向
-    void OnTrackingOriginUpdated(XRInputSubsystem _)
+    IEnumerator WaitForTrackingAndRecenter()
     {
-        if (m_Recentered) return;
-        m_Recentered = true;
-        StartCoroutine(RecenterNextFrame());
+        float waitStartedAt = Time.realtimeSinceStartup;
+        Debug.Log("[XRRecenterOnStart] Waiting for valid HMD position and rotation tracking.");
+
+        while (Time.realtimeSinceStartup - waitStartedAt < TrackingWaitTimeoutSeconds)
+        {
+            if (IsHeadTrackingValid() && TryRecenter())
+            {
+                m_StartupAlignmentFinished = true;
+                m_StartupRecenterCoroutine = null;
+                ColdStartSplashOverlay.MarkWorldCoordinatesAligned();
+                Debug.Log("[XRRecenterOnStart] HMD tracking is valid; world forward aligned to view yaw.");
+                yield break;
+            }
+
+            yield return null;
+        }
+
+        m_StartupAlignmentFinished = true;
+        m_StartupRecenterCoroutine = null;
+        ColdStartSplashOverlay.MarkWorldAlignmentTimedOut();
+        Debug.LogWarning($"[XRRecenterOnStart] HMD tracking did not become valid within {TrackingWaitTimeoutSeconds:0.#} seconds; startup recenter skipped.");
     }
 
-    IEnumerator RecenterNextFrame()
+    static bool IsHeadTrackingValid()
     {
-        // 等待数帧，确保新追踪模式下的姿态数据稳定
-        yield return null;
-        DoRecenter();
+        InputDevice headDevice = InputDevices.GetDeviceAtXRNode(XRNode.Head);
+        if (!headDevice.isValid)
+            return false;
+
+        if (!headDevice.TryGetFeatureValue(CommonUsages.isTracked, out bool isTracked) || !isTracked)
+            return false;
+
+        if (!headDevice.TryGetFeatureValue(CommonUsages.trackingState, out InputTrackingState trackingState))
+            return false;
+
+        const InputTrackingState requiredTracking =
+            InputTrackingState.Position | InputTrackingState.Rotation;
+        if ((trackingState & requiredTracking) != requiredTracking)
+            return false;
+
+        return headDevice.TryGetFeatureValue(CommonUsages.devicePosition, out _) &&
+            headDevice.TryGetFeatureValue(CommonUsages.deviceRotation, out _);
     }
 
     // 长按 Home：OS 已重置追踪空间，XROrigin 归零即对齐
@@ -58,15 +92,21 @@ public class XRRecenterOnStart : MonoBehaviour
 
     public void DoRecenter()
     {
-        var cam = m_XROrigin.Camera;
-        if (cam == null) return;
+        TryRecenter();
+    }
+
+    bool TryRecenter()
+    {
+        Camera cam = m_XROrigin.Camera;
+        if (cam == null)
+            return false;
 
         // 将相机移至世界原点（含 Y）
         transform.position -= cam.transform.position;
         // 还原 Device mode 的 CameraYOffset，使 XROrigin.Y 回到 0
         transform.position += Vector3.up * m_XROrigin.CameraYOffset;
 
-        // 修正朝向
-        m_XROrigin.MatchOriginUpCameraForward(Vector3.up, Vector3.forward);
+        // 仅修正水平朝向，保持世界 Y 轴竖直。
+        return m_XROrigin.MatchOriginUpCameraForward(Vector3.up, Vector3.forward);
     }
 }

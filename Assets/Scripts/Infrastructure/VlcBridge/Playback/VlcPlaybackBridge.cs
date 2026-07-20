@@ -1160,7 +1160,6 @@ public class VlcPlaybackBridge : MonoBehaviour
                 float rate = bridge.CallStatic<float>("getRate");
                 if (float.IsNaN(rate) || float.IsInfinity(rate) || rate <= 0f)
                     rate = 1f;
-                PublishPlaybackRate(rate);
                 Debug.Log($"[VlcPlaybackBridge] GetPlaybackRate returned: {rate}");
                 return rate;
             }

@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -21,6 +23,10 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private const float SwitchTrackThickness = SwitchKnobSize * 0.5f;
     private const float SwitchKnobTravel = (SwitchWidth - SwitchKnobSize) * 0.5f;
     private const float ChromaKeyParameterMax = 0.5f;
+    private const float ColorExtractionSurfaceReadyTimeoutSeconds = 8f;
+    private const float PanelWidth = 560f;
+    private const float ExpandedPanelHeight = 840f;
+    private const float CollapsedPanelHeight = 82f;
     private PlaybackService _playbackService;
     private PicoPassthroughModeService _passthroughService;
     private Button _seeThroughButton;
@@ -34,6 +40,7 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private TMP_InputField _hexInput;
     private Image _colorPreview;
     private Button _extractColorButton;
+    private TextMeshProUGUI _extractColorLabel;
     private Slider _rangeSlider;
     private Slider _falloffSlider;
     private Toggle _edgeSmoothToggle;
@@ -48,6 +55,8 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private bool _colorExtractionPending;
     private bool _previousPassthroughEnabled;
     private bool _hasPassthroughSnapshot;
+    private Coroutine _colorExtractionRequestCoroutine;
+    private readonly List<GameObject> _parameterControlRoots = new List<GameObject>();
 
     public bool IsOpen => gameObject.activeSelf;
     public bool IsChromaKeyEnabled => _playbackService != null && _playbackService.CurrentChromaKeySettings.Enabled;
@@ -104,7 +113,7 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         _built = true;
 
         RectTransform rect = GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(560f, 840f);
+        rect.sizeDelta = new Vector2(PanelWidth, ExpandedPanelHeight);
         Image panel = GetComponent<Image>();
         if (panel != null)
         {
@@ -129,10 +138,11 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
             XrUiText.Get(XrUiTextKey.ChromaKeyEnabled));
         _enabledToggle.onValueChanged.AddListener(OnEnabledChanged);
 
-        CreateLabel(transform, XrUiText.Get(XrUiTextKey.ChromaKeyColor), 24f, 30f);
-        CreateColorPalette(transform);
-        CreateHexRow(transform);
-        CreateExtractColorButton(transform);
+        _parameterControlRoots.Add(
+            CreateLabel(transform, XrUiText.Get(XrUiTextKey.ChromaKeyColor), 24f, 30f).gameObject);
+        _parameterControlRoots.Add(CreateColorPalette(transform));
+        _parameterControlRoots.Add(CreateHexRow(transform));
+        _parameterControlRoots.Add(CreateExtractColorButton(transform));
 
         _rangeSlider = CreatePercentSlider(
             transform,
@@ -140,6 +150,7 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
             XrUiText.Get(XrUiTextKey.ChromaKeyColorRange),
             out _rangeValue);
         _rangeSlider.onValueChanged.AddListener(OnRangeChanged);
+        _parameterControlRoots.Add(_rangeSlider.transform.parent.gameObject);
 
         _falloffSlider = CreatePercentSlider(
             transform,
@@ -147,11 +158,12 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
             XrUiText.Get(XrUiTextKey.ChromaKeyFalloff),
             out _falloffValue);
         _falloffSlider.onValueChanged.AddListener(OnFalloffChanged);
+        _parameterControlRoots.Add(_falloffSlider.transform.parent.gameObject);
 
-        CreatePostProcessSwitchGrid(transform);
+        _parameterControlRoots.Add(CreatePostProcessSwitchGrid(transform));
     }
 
-    private void CreateColorPalette(Transform parent)
+    private GameObject CreateColorPalette(Transform parent)
     {
         GameObject row = CreateRow(parent, "HsvPaletteRow", 230f);
 
@@ -193,9 +205,10 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         if (hueFill != null)
             hueFill.enabled = false;
         _hueSlider.onValueChanged.AddListener(OnHueChanged);
+        return row;
     }
 
-    private void CreateHexRow(Transform parent)
+    private GameObject CreateHexRow(Transform parent)
     {
         GameObject row = CreateRow(parent, "HexColorRow", 52f);
         CreateLabel(row.transform, XrUiText.Get(XrUiTextKey.ChromaKeyHex), 22f, 48f, 150f);
@@ -239,9 +252,10 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         LayoutElement previewLayout = preview.GetComponent<LayoutElement>();
         previewLayout.preferredWidth = 48f;
         previewLayout.preferredHeight = 48f;
+        return row;
     }
 
-    private void CreateExtractColorButton(Transform parent)
+    private GameObject CreateExtractColorButton(Transform parent)
     {
         GameObject buttonObject = new GameObject(
             "ExtractKeyColorButton",
@@ -256,33 +270,39 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         layout.flexibleWidth = 1f;
 
         Image image = buttonObject.GetComponent<Image>();
+        image.sprite = null;
+        image.type = Image.Type.Simple;
+        image.preserveAspect = false;
+        image.raycastTarget = true;
         image.color = new Color(1f, 1f, 1f, 0.12f);
-        if (_seeThroughButton != null)
-        {
-            CopyImageVisual(_seeThroughButton.targetGraphic as Image, image);
-            image.color = new Color(1f, 1f, 1f, 0.12f);
-        }
 
         _extractColorButton = buttonObject.GetComponent<Button>();
         _extractColorButton.targetGraphic = image;
-        if (_seeThroughButton != null)
-            _extractColorButton.colors = _seeThroughButton.colors;
+        ColorBlock colors = ColorBlock.defaultColorBlock;
+        colors.normalColor = new Color(1f, 1f, 1f, 0.12f);
+        colors.highlightedColor = new Color(1f, 1f, 1f, 0.20f);
+        colors.pressedColor = new Color(1f, 1f, 1f, 0.28f);
+        colors.selectedColor = colors.highlightedColor;
+        colors.disabledColor = new Color(1f, 1f, 1f, 0.06f);
+        colors.fadeDuration = 0.08f;
+        _extractColorButton.colors = colors;
         _extractColorButton.onClick.AddListener(OnExtractColorClicked);
 
-        TextMeshProUGUI label = CreateLabel(
+        _extractColorLabel = CreateLabel(
             buttonObject.transform,
             XrUiText.Get(XrUiTextKey.ChromaKeyExtractColor),
             22f,
             48f);
-        RectTransform labelRect = label.rectTransform;
+        RectTransform labelRect = _extractColorLabel.rectTransform;
         labelRect.anchorMin = Vector2.zero;
         labelRect.anchorMax = Vector2.one;
         labelRect.offsetMin = Vector2.zero;
         labelRect.offsetMax = Vector2.zero;
-        label.alignment = TextAlignmentOptions.Center;
+        _extractColorLabel.alignment = TextAlignmentOptions.Center;
+        return buttonObject;
     }
 
-    private void CreatePostProcessSwitchGrid(Transform parent)
+    private GameObject CreatePostProcessSwitchGrid(Transform parent)
     {
         GameObject grid = new GameObject(
             "ChromaKeyPostProcessSwitches",
@@ -322,6 +342,7 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         _clipBlackToggle.onValueChanged.AddListener(OnClipBlackChanged);
         _clipWhiteToggle.onValueChanged.AddListener(OnClipWhiteChanged);
         _despillToggle.onValueChanged.AddListener(OnDespillChanged);
+        return grid;
     }
 
     private Toggle CreateSwitchRow(Transform parent, string name, string label)
@@ -739,13 +760,75 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
 
     private void OnExtractColorClicked()
     {
-        if (_colorExtractionPending || _playbackService == null)
+        Debug.Log(
+            $"[ChromaKeyPanel] Extract color clicked pending={_colorExtractionPending} " +
+            $"playbackService={_playbackService != null} " +
+            $"chromaEnabled={_playbackService != null && _playbackService.CurrentChromaKeySettings.Enabled}");
+
+        if (_colorExtractionPending)
+        {
+            Debug.LogWarning("[ChromaKeyPanel] Ignoring duplicate color extraction request while one is pending.");
             return;
+        }
+
+        if (_playbackService == null)
+        {
+            Debug.LogWarning("[ChromaKeyPanel] Cannot extract color because PlaybackService is unavailable.");
+            return;
+        }
 
         _colorExtractionPending = true;
-        if (_extractColorButton != null)
-            _extractColorButton.interactable = false;
+        UpdateExtractColorButtonState();
+
+        if (!_playbackService.CurrentChromaKeySettings.Enabled)
+        {
+            Debug.LogWarning("[ChromaKeyPanel] Color extraction ignored because chroma key is disabled.");
+            HandleColorExtractionCompleted(false);
+            return;
+        }
+
+        _colorExtractionRequestCoroutine = StartCoroutine(RequestColorExtractionWhenSurfaceReady());
+    }
+
+    private IEnumerator RequestColorExtractionWhenSurfaceReady()
+    {
+        float waitStartedAt = Time.realtimeSinceStartup;
+        while (_colorExtractionPending
+               && _playbackService != null
+               && !_playbackService.IsChromaKeyColorExtractionReady
+               && Time.realtimeSinceStartup - waitStartedAt < ColorExtractionSurfaceReadyTimeoutSeconds)
+        {
+            yield return null;
+        }
+
+        _colorExtractionRequestCoroutine = null;
+        if (!_colorExtractionPending)
+            yield break;
+
+        if (_playbackService == null || !_playbackService.IsChromaKeyColorExtractionReady)
+        {
+            Debug.LogWarning(
+                $"[ChromaKeyPanel] Color extraction surface readiness timed out after " +
+                $"{Time.realtimeSinceStartup - waitStartedAt:F2}s.");
+            HandleColorExtractionCompleted(false);
+            yield break;
+        }
+
+        Debug.Log(
+            $"[ChromaKeyPanel] Color extraction surface ready after " +
+            $"{Time.realtimeSinceStartup - waitStartedAt:F2}s; requesting dominant color.");
         _playbackService.RequestChromaKeyColorExtraction();
+    }
+
+    private void UpdateExtractColorButtonState()
+    {
+        if (_extractColorButton != null)
+            _extractColorButton.interactable = !_colorExtractionPending;
+        if (_extractColorLabel != null)
+        {
+            string label = XrUiText.Get(XrUiTextKey.ChromaKeyExtractColor);
+            _extractColorLabel.text = _colorExtractionPending ? label + "…" : label;
+        }
     }
 
     private void OnEdgeSmoothChanged(bool enabled)
@@ -816,8 +899,32 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
             _falloffValue.text = FormatPercent(falloffUiValue);
         _updatingUi = false;
 
+        SetParameterControlsVisible(settings.Enabled);
+
         if (_seeThroughButton != null)
             _seeThroughButton.interactable = !settings.Enabled && (_passthroughService == null || _passthroughService.IsSupported);
+    }
+
+    private void SetParameterControlsVisible(bool visible)
+    {
+        for (int i = 0; i < _parameterControlRoots.Count; i++)
+        {
+            GameObject root = _parameterControlRoots[i];
+            if (root != null && root.activeSelf != visible)
+                root.SetActive(visible);
+        }
+
+        if (!visible && _colorExtractionPending)
+            HandleColorExtractionCompleted(false);
+
+        RectTransform rect = GetComponent<RectTransform>();
+        if (rect != null)
+        {
+            rect.sizeDelta = new Vector2(
+                PanelWidth,
+                visible ? ExpandedPanelHeight : CollapsedPanelHeight);
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+        }
     }
 
     private void HandleSettingsChanged(ChromaKeySettings settings)
@@ -827,9 +934,15 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
 
     private void HandleColorExtractionCompleted(bool success)
     {
+        if (_colorExtractionRequestCoroutine != null)
+        {
+            StopCoroutine(_colorExtractionRequestCoroutine);
+            _colorExtractionRequestCoroutine = null;
+        }
+
+        Debug.Log($"[ChromaKeyPanel] Color extraction completed success={success}.");
         _colorExtractionPending = false;
-        if (_extractColorButton != null)
-            _extractColorButton.interactable = true;
+        UpdateExtractColorButtonState();
     }
 
     private void HandleMediaChanged(MediaWrapper media, int index)
@@ -906,6 +1019,11 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (_colorExtractionRequestCoroutine != null)
+        {
+            StopCoroutine(_colorExtractionRequestCoroutine);
+            _colorExtractionRequestCoroutine = null;
+        }
         Unsubscribe();
         RestorePassthrough();
         if (_hueTexture != null)

@@ -16,7 +16,9 @@ public static class ColdStartSplashOverlay
     private static OverlayLifetime s_Lifetime;
     private static Coroutine s_HideCoroutine;
     private static float s_ShownAtRealtime;
-    private static bool s_VlcActivityReady;
+    private static bool s_HideRequested;
+    private static bool s_WorldCoordinatesAligned;
+    private static bool s_WorldAlignmentTimedOut;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void ShowBeforeSceneLoad()
@@ -32,7 +34,9 @@ public static class ColdStartSplashOverlay
         if (Application.platform != RuntimePlatform.Android)
             return;
 #endif
-        s_VlcActivityReady = false;
+        s_HideRequested = false;
+        s_WorldCoordinatesAligned = false;
+        s_WorldAlignmentTimedOut = false;
         CancelPendingHide();
         Show();
     }
@@ -42,22 +46,28 @@ public static class ColdStartSplashOverlay
         if (s_Root == null)
             return;
 
-        s_VlcActivityReady = true;
+        s_HideRequested = true;
+        HideWhenReadyAfterMinimumVisibleTime();
+    }
+
+    public static void MarkWorldCoordinatesAligned()
+    {
+        s_WorldCoordinatesAligned = true;
+        Debug.Log("[ColdStartSplashOverlay] World coordinates aligned.");
+        HideWhenReadyAfterMinimumVisibleTime();
+    }
+
+    public static void MarkWorldAlignmentTimedOut()
+    {
+        s_WorldAlignmentTimedOut = true;
+        Debug.LogWarning("[ColdStartSplashOverlay] World alignment timed out; splash alignment gate released.");
         HideWhenReadyAfterMinimumVisibleTime();
     }
 
     public static void Hide()
     {
-        CancelPendingHide();
-
-        if (s_Root == null)
-            return;
-
-        Object.Destroy(s_Root);
-        s_Root = null;
-        s_Lifetime = null;
-        s_VlcActivityReady = false;
-        Debug.Log("[ColdStartSplashOverlay] Hidden.");
+        s_HideRequested = true;
+        HideWhenReadyAfterMinimumVisibleTime();
     }
 
     private static void Show()
@@ -87,13 +97,13 @@ public static class ColdStartSplashOverlay
 
     private static void HideWhenReadyAfterMinimumVisibleTime()
     {
-        if (!s_VlcActivityReady || s_Root == null)
+        if (!s_HideRequested || !IsWorldAlignmentGateReleased() || s_Root == null)
             return;
 
         float remainingSeconds = GetRemainingMinimumVisibleSeconds();
         if (remainingSeconds <= 0f)
         {
-            Hide();
+            HideImmediately();
             return;
         }
 
@@ -115,8 +125,27 @@ public static class ColdStartSplashOverlay
         yield return new WaitForSecondsRealtime(delaySeconds);
         s_HideCoroutine = null;
 
-        if (s_VlcActivityReady)
-            Hide();
+        if (s_HideRequested && IsWorldAlignmentGateReleased())
+            HideImmediately();
+    }
+
+    private static bool IsWorldAlignmentGateReleased()
+    {
+        return s_WorldCoordinatesAligned || s_WorldAlignmentTimedOut;
+    }
+
+    private static void HideImmediately()
+    {
+        CancelPendingHide();
+
+        if (s_Root == null)
+            return;
+
+        Object.Destroy(s_Root);
+        s_Root = null;
+        s_Lifetime = null;
+        s_HideRequested = false;
+        Debug.Log("[ColdStartSplashOverlay] Hidden.");
     }
 
     private static void CancelPendingHide()

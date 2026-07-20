@@ -312,7 +312,7 @@ namespace XRVLC
 
             _passthroughBackgroundEnabled = enabled;
             if (_currentProjection == VideoProjection.Flat || _currentProjection == VideoProjection.Cylinder)
-                UpdateFlatUnderlayBackgroundColor();
+                UpdateFlatUnderlayBackground();
         }
 
         private void SetupFlatMode()
@@ -343,17 +343,14 @@ namespace XRVLC
         private void LateUpdate()
         {
             if (_currentProjection == VideoProjection.Flat || _currentProjection == VideoProjection.Cylinder)
-                UpdateFlatUnderlayBackgroundColor();
+                UpdateFlatUnderlayBackground();
         }
 
         private void ApplyFlatUnderlayAlphaHoleBackground()
         {
             Camera targetCamera = GetMainCamera();
             if (targetCamera != null)
-            {
-                targetCamera.clearFlags = CameraClearFlags.SolidColor;
-                UpdateFlatUnderlayBackgroundColor();
-            }
+                UpdateFlatUnderlayBackground();
 
             if (backgroundBoard != null)
                 backgroundBoard.gameObject.SetActive(false);
@@ -535,19 +532,27 @@ namespace XRVLC
             _cylinderAlphaHoleMesh.RecalculateBounds();
         }
 
-        private void UpdateFlatUnderlayBackgroundColor()
+        private void UpdateFlatUnderlayBackground()
         {
             Camera targetCamera = GetMainCamera();
             if (targetCamera == null)
                 return;
 
-            targetCamera.clearFlags = CameraClearFlags.SolidColor;
             if (_passthroughBackgroundEnabled)
             {
+                targetCamera.clearFlags = CameraClearFlags.SolidColor;
                 targetCamera.backgroundColor = new Color(0f, 0f, 0f, 0f);
                 return;
             }
 
+            if (RenderSettings.skybox != null)
+            {
+                targetCamera.clearFlags = CameraClearFlags.Skybox;
+                targetCamera.backgroundColor = Color.black;
+                return;
+            }
+
+            targetCamera.clearFlags = CameraClearFlags.SolidColor;
             bool screenVisible = IsVideoScreenInCameraView(targetCamera);
             targetCamera.backgroundColor = screenVisible
                 ? new Color(0f, 0f, 0f, 1f)
@@ -703,7 +708,7 @@ namespace XRVLC
         }
 
         /// <summary>
-        /// 视角复位：将全景/鱼眼球体中心对齐到玩家头部
+        /// 视角复位：将全景/鱼眼球体中心对齐到玩家头部，朝向恢复为世界 +Z。
         /// </summary>
         public void RecenterImmersiveSphere()
         {
@@ -711,11 +716,10 @@ namespace XRVLC
             if (_currentProjection == VideoProjection.Flat || _currentProjection == VideoProjection.Cylinder) return;
 
             videoAnchor.position = playerHeadCamera.position;
-            float playerYaw = playerHeadCamera.eulerAngles.y;
-            videoAnchor.rotation = Quaternion.Euler(0, playerYaw, 0);
+            videoAnchor.rotation = Quaternion.identity;
             _transformService?.ResetImmersiveDistanceOffset();
 
-            Debug.Log($"[VideoScreen] 视角已复位，新球心位置: {videoAnchor.position}");
+            Debug.Log($"[VideoScreen] 视角已复位，新球心位置: {videoAnchor.position}，朝向: 世界 +Z");
         }
 
         /// <summary>

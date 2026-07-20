@@ -54,7 +54,7 @@ namespace XRVLC
             _screenRootAuthoredPosition = screenRoot != null ? screenRoot.position : Vector3.zero;
             _screenRootAuthoredRotation = screenRoot != null ? screenRoot.rotation : Quaternion.identity;
 
-            EnsureMoveTargetState();
+            _activeMoveTarget = GetMoveTarget();
         }
 
         /// <summary>
@@ -166,7 +166,7 @@ namespace XRVLC
         }
 
         /// <summary>
-        /// 恢复场景 authored 默认位置，并重新朝向当前玩家视角。
+        /// 恢复场景 authored 默认位置和朝向。
         /// </summary>
         public void ResetToDefault()
         {
@@ -182,10 +182,6 @@ namespace XRVLC
             {
                 target.SetPositionAndRotation(_screenRootAuthoredPosition, _screenRootAuthoredRotation);
             }
-
-            Transform viewer = _viewerProvider?.Invoke();
-            if (viewer != null && target == _screenRoot)
-                FaceViewer(_screenRoot, viewer);
         }
 
         private bool IsImmersive()
@@ -214,16 +210,6 @@ namespace XRVLC
             if (target == null || target == _activeMoveTarget) return;
 
             _activeMoveTarget = target;
-
-            Transform viewer = _viewerProvider?.Invoke();
-            if (viewer != null && !IsImmersive())
-                FaceViewer(_screenRoot, viewer);
-        }
-
-        private static void FaceViewer(Transform target, Transform viewer)
-        {
-            if (target == null || viewer == null) return;
-            FacePoint(target, viewer.position);
         }
 
         private static void FacePoint(Transform target, Vector3 point)
