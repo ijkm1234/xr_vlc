@@ -1,4 +1,0 @@
-[submodule "vlc-android"]
-	path = vlc-android
-	url = git@github-ijkm1234:ijkm1234/vlc_android_for_xr_vlc.git
-	branch = init

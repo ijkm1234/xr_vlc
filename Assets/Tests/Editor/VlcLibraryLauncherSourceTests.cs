@@ -109,7 +109,7 @@ namespace XRVLC.Tests
         [Test]
         public void VlcStartActivity_ForwardsForegroundDelayRequestWithoutDelayingResume()
         {
-            string path = Path.Combine(Application.dataPath, "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/StartActivity.kt");
+            string path = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/StartActivity.kt");
             string source = File.ReadAllText(path);
 
             StringAssert.Contains("private const val EXTRA_DEFER_VLC_FOREGROUND_MS", source);
@@ -125,7 +125,7 @@ namespace XRVLC.Tests
         [Test]
         public void VlcMainActivity_DefersColdStartForegroundByMovingTaskBackThenFront()
         {
-            string path = Path.Combine(Application.dataPath, "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/MainActivity.kt");
+            string path = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/MainActivity.kt");
             string source = File.ReadAllText(path);
 
             StringAssert.Contains("private const val EXTRA_DEFER_VLC_FOREGROUND_MS", source);
@@ -174,7 +174,7 @@ namespace XRVLC.Tests
         [Test]
         public void SubtitlePicker_FallsBackToInternalStorageWhenMediaHasNoBrowsableParent()
         {
-            string pickerPath = Path.Combine(Application.dataPath, "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/browser/FilePickerFragment.kt");
+            string pickerPath = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/browser/FilePickerFragment.kt");
             string pickerSource = File.ReadAllText(pickerPath);
 
             StringAssert.Contains("import org.videolan.resources.KEY_MRL", pickerSource);
@@ -189,7 +189,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("private fun internalStorageMrl() = \"file://${AndroidDevices.EXTERNAL_PUBLIC_DIRECTORY}\"", pickerSource);
             StringAssert.DoesNotContain("activity?.intent = null", pickerSource);
 
-            string bridgePath = Path.Combine(Application.dataPath, "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
+            string bridgePath = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
             string bridgeSource = File.ReadAllText(bridgePath);
             StringAssert.Contains("import org.videolan.resources.AndroidDevices", bridgeSource);
             StringAssert.Contains("intent.putExtra(KEY_MEDIA, createSubtitlePickerParentMedia())", bridgeSource);
@@ -197,7 +197,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("return createInternalStorageMediaWrapper()", bridgeSource);
             StringAssert.Contains("private fun createInternalStorageMediaWrapper() = MediaWrapperImpl(\"file://${AndroidDevices.EXTERNAL_PUBLIC_DIRECTORY}\".toUri())", bridgeSource);
 
-            string overlayPath = Path.Combine(Application.dataPath, "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/video/VideoPlayerOverlayDelegate.kt");
+            string overlayPath = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/video/VideoPlayerOverlayDelegate.kt");
             string overlaySource = File.ReadAllText(overlayPath);
             StringAssert.Contains("private fun createSubtitlePickerParentMedia(): MediaWrapper", overlaySource);
             StringAssert.Contains("val fallback = \"file://${AndroidDevices.EXTERNAL_PUBLIC_DIRECTORY}\"", overlaySource);

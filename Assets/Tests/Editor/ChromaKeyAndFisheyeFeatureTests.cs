@@ -141,7 +141,11 @@ namespace XRVLC.Tests
 
         private static string Read(string relativePath)
         {
-            return File.ReadAllText(Path.Combine(Directory.GetParent(Application.dataPath).FullName, relativePath));
+            string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+            string basePath = relativePath.StartsWith("vlc-android/", StringComparison.Ordinal)
+                ? Directory.GetParent(projectRoot).FullName
+                : projectRoot;
+            return File.ReadAllText(Path.Combine(basePath, relativePath));
         }
     }
 }

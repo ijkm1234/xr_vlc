@@ -72,7 +72,7 @@ sdkmanager \
 echo ""
 echo "===== Step 4: Update local.properties ====="
 
-LOCAL_PROPS="/Users/admin/xr_vlc/vlc-android/local.properties"
+LOCAL_PROPS="/Users/admin/vlc-android/local.properties"
 cat > "$LOCAL_PROPS" << EOF
 sdk.dir=$ANDROID_SDK_ROOT
 android.ndkFullVersion=21.4.7075529
@@ -100,7 +100,7 @@ echo ""
 echo "===== Setup Complete! ====="
 echo ""
 echo "Now build the AAR:"
-echo "  cd /Users/admin/xr_vlc/vlc-android"
+echo "  cd /Users/admin/vlc-android"
 echo "  export JAVA_HOME=$JDK_HOME"
 echo "  ./gradlew :application:vlc-android:assembleDebug"
 echo ""

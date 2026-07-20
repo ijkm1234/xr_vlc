@@ -1981,7 +1981,7 @@ namespace XRVLC.Tests
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string bridgePath = Path.Combine(
                 projectRoot,
-                "vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
+                "../vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
             string source = File.ReadAllText(bridgePath);
 
             StringAssert.Contains("fun setVideoScale", source);
@@ -2009,7 +2009,7 @@ namespace XRVLC.Tests
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string playlistManagerPath = Path.Combine(
                 projectRoot,
-                "vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt");
+                "../vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt");
             string source = File.ReadAllText(playlistManagerPath);
 
             StringAssert.Contains("PlaybackServiceBridge.shouldMixAudioToMono()", source);
