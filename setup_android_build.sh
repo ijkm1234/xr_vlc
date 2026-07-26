@@ -62,12 +62,14 @@ echo "===== Step 3: Install Android SDK packages ====="
 
 yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-echo "Installing: platform-tools, platforms;android-34, build-tools;34.0.0, ndk;21.4.7075529"
+ANDROID_NDK_VERSION="27.3.13750724"
+
+echo "Installing: platform-tools, platforms;android-34, build-tools;34.0.0, ndk;$ANDROID_NDK_VERSION"
 sdkmanager \
     "platform-tools" \
     "platforms;android-34" \
     "build-tools;34.0.0" \
-    "ndk;21.4.7075529"
+    "ndk;$ANDROID_NDK_VERSION"
 
 echo ""
 echo "===== Step 4: Update local.properties ====="
@@ -75,7 +77,8 @@ echo "===== Step 4: Update local.properties ====="
 LOCAL_PROPS="/Users/admin/vlc-android/local.properties"
 cat > "$LOCAL_PROPS" << EOF
 sdk.dir=$ANDROID_SDK_ROOT
-android.ndkFullVersion=21.4.7075529
+android.ndkPath=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION
+android.ndkFullVersion=$ANDROID_NDK_VERSION
 EOF
 echo "Updated: $LOCAL_PROPS"
 
@@ -99,10 +102,9 @@ fi
 echo ""
 echo "===== Setup Complete! ====="
 echo ""
-echo "Now build the AAR:"
-echo "  cd /Users/admin/vlc-android"
-echo "  export JAVA_HOME=$JDK_HOME"
-echo "  ./gradlew :application:vlc-android:assembleDebug"
+echo "Now build and verify the Unity AAR:"
+echo "  cd /Users/admin/xr_vlc"
+echo "  ./scripts/build-vlc-android-aar.sh"
 echo ""
 echo "AAR output:"
-echo "  application/vlc-android/build/outputs/aar/vlc-android-debug.aar"
+echo "  /Users/admin/xr_vlc/Assets/Plugins/Android/vlc-android-debug.aar"

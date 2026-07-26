@@ -21,6 +21,7 @@ output_BackUpThisFolder_ButDontShipItWithYourGame/
 xr_vlc_BurstDebugInformation_DoNotShip/
 diagnostic-builds/
 Assets/_Recovery/
+Assets/_Recovery.meta
 
 # Local project documentation/design notes
 /AGENTS.md

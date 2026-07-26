@@ -40,6 +40,9 @@ public class VlcFocusRestoreHandler
     {
         if (_hiddenByFocusLoss)
         {
+            if (_restoreCoroutine != null)
+                CancelRestore();
+
             Debug.Log("[VlcFocusRestore] HideControllers ignored; controllers are already hidden by focus loss.");
             return;
         }
@@ -88,7 +91,6 @@ public class VlcFocusRestoreHandler
         }
 
         Debug.Log($"[VlcFocusRestore] TriggerRestore begin; storedObjectCount={m_HiddenObjects.Length}; owner={DescribeOwner(_owner)}");
-        _hiddenByFocusLoss = false;
         CancelRestore();
         if (_owner != null)
         {
@@ -136,6 +138,7 @@ public class VlcFocusRestoreHandler
 
         RestoreVisualState();
         EnsureRayVisualDriversCanRender(objects);
+        _hiddenByFocusLoss = false;
 
         for (int i = 0; i < objects.Length; i++)
             Debug.Log($"[VlcFocusRestore] Restore target[{i}] after restore: {DescribeObject(objects[i])}; rayVisuals={DescribeRayVisuals(objects[i])}");

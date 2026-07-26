@@ -135,9 +135,12 @@ Shader "XRVLC/ProceduralStarfieldSkybox"
                 float2 starPixelOffset = float2(
                     (starDelta.x * gridDy.y - starDelta.y * gridDy.x) / safeDeterminant,
                     (gridDx.x * starDelta.y - gridDx.y * starDelta.x) / safeDeterminant);
-                float starMask = step(
-                    max(abs(starPixelOffset.x), abs(starPixelOffset.y)),
-                    0.5);
+                // Reconstruct the subpixel point with a separable tent filter. Its
+                // total energy remains approximately one pixel while neighboring
+                // pixels share that energy during a pixel-boundary crossing. This
+                // avoids both the hard positional jump and the fade-to-black pulse.
+                float2 subpixelCoverage = saturate(1.0 - abs(starPixelOffset));
+                float starMask = subpixelCoverage.x * subpixelCoverage.y;
 
                 float brightness = lerp(
                     _MinBrightness,

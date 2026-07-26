@@ -552,6 +552,32 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
+    public static bool TryHasActivePlaybackSelection(out bool hasActiveSelection)
+    {
+        hasActiveSelection = false;
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                int state = bridge.CallStatic<int>("getPlaybackSelectionState");
+                if (state < 0)
+                    return false;
+
+                hasActiveSelection = state == 1;
+                return true;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetPlaybackSelectionState failed: {e.Message}");
+            return false;
+        }
+#else
+        return false;
+#endif
+    }
+
     public static int GetPlayerState()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR

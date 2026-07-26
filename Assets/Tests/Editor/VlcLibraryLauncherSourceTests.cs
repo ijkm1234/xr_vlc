@@ -16,13 +16,16 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void SessionFocusState_UsesNullableLastState()
+        public void SessionFocusState_UsesNullableObservedStateAndPollingCorrection()
         {
             string source = ReadLauncherSource();
 
-            StringAssert.Contains("private bool? m_LastSessionFocused;", source);
-            StringAssert.Contains("m_LastSessionFocused.HasValue", source);
-            StringAssert.Contains("focused == m_LastSessionFocused.Value", source);
+            StringAssert.Contains("private bool? m_LastObservedXrFocused;", source);
+            StringAssert.Contains("m_LastObservedXrFocused.HasValue", source);
+            StringAssert.Contains("m_LastObservedXrFocused.Value == focused", source);
+            StringAssert.Contains("private IEnumerator PollPicoFocusState()", source);
+            StringAssert.Contains("m_FocusPollIntervalSeconds = 0.1f;", source);
+            StringAssert.Contains("PXR_Plugin.System.UPxr_GetFocusState()", source);
             Assert.IsFalse(source.Contains("private bool m_SessionWasFocused;"));
         }
 
