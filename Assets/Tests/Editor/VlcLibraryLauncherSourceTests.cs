@@ -126,7 +126,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VlcMainActivity_DefersColdStartForegroundByMovingTaskBackThenFront()
+        public void VlcMainActivity_NotifiesUnityWhenStartedAndDefersColdStartForeground()
         {
             string path = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/MainActivity.kt");
             string source = File.ReadAllText(path);
@@ -134,14 +134,15 @@ namespace XRVLC.Tests
             StringAssert.Contains("private const val EXTRA_DEFER_VLC_FOREGROUND_MS", source);
             StringAssert.Contains("private val mainHandler = Handler(Looper.getMainLooper())", source);
             StringAssert.Contains("private var deferredForegroundHandled = false", source);
-            StringAssert.Contains("private var isWaitingForDeferredForeground = false", source);
+            StringAssert.Contains("override fun onStart()", source);
+            StringAssert.Contains("notifyUnityVlcActivityReady()", source);
             StringAssert.Contains("maybeDeferVlcForeground()", source);
             StringAssert.Contains("private fun maybeDeferVlcForeground()", source);
             StringAssert.Contains("moveTaskToBack(true)", source);
             StringAssert.Contains("mainHandler.postDelayed({", source);
             StringAssert.Contains("bringVlcTaskToFront()", source);
             StringAssert.Contains("appTask.moveToFront()", source);
-            StringAssert.Contains("if (hasFocus && !isWaitingForDeferredForeground) notifyUnityVlcActivityReady()", source);
+            StringAssert.DoesNotContain("override fun onWindowFocusChanged(hasFocus: Boolean)", source);
             StringAssert.Contains("override fun onNewIntent(intent: Intent)", source);
             StringAssert.Contains("setIntent(intent)", source);
         }

@@ -20,6 +20,8 @@ public static class ColdStartSplashOverlay
     private static bool s_WorldCoordinatesAligned;
     private static bool s_WorldAlignmentTimedOut;
 
+    public static bool IsVisible => s_Root != null;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void ShowBeforeSceneLoad()
     {

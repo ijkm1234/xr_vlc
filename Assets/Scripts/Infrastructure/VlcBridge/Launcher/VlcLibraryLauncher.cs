@@ -45,7 +45,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     private VlcHomePanelController m_HomePanelController;
     private Coroutine m_FocusPollCoroutine;
     private Coroutine m_FocusedUiCoroutine;
-    private bool m_AarLaunchPending;
     private bool m_AarVisible;
     private bool m_RestoreAarAfterSystemPanel;
     private bool m_AwaitingPlaybackStartAfterAarReturn;
@@ -235,7 +234,6 @@ public class VlcLibraryLauncher : MonoBehaviour
                 if (TryRestoreExistingVlcTask())
                 {
                     m_RestoreAarAfterSystemPanel = false;
-                    m_AarLaunchPending = false;
                     m_AarVisible = true;
                     Debug.Log("[VlcLibraryLauncher] AAR restore cooldown elapsed; restored AAR after system panel.");
                     m_FocusedUiCoroutine = null;
@@ -251,16 +249,8 @@ public class VlcLibraryLauncher : MonoBehaviour
             }
 
             m_RestoreAarAfterSystemPanel = false;
-            m_AarLaunchPending = false;
             m_AarVisible = false;
             Debug.LogWarning("[VlcLibraryLauncher] AAR restore after system panel failed; evaluating Unity Home panel.");
-        }
-
-        if (m_AarLaunchPending)
-        {
-            EnsureHomePanelController()?.SetVisible(false);
-            m_FocusedUiCoroutine = null;
-            yield break;
         }
 
         if (m_AarVisible)
@@ -303,7 +293,7 @@ public class VlcLibraryLauncher : MonoBehaviour
         for (int attempt = 0; attempt < attempts; attempt++)
         {
             if (m_LastObservedXrFocused != true ||
-                m_AarLaunchPending ||
+                ColdStartSplashOverlay.IsVisible ||
                 m_AarVisible ||
                 m_RestoreAarAfterSystemPanel)
                 yield break;
@@ -442,7 +432,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     {
         m_AwaitingPlaybackStartAfterAarReturn = false;
         m_PlaybackActiveOrStarting = true;
-        m_AarLaunchPending = false;
         m_AarVisible = false;
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
@@ -495,28 +484,25 @@ public class VlcLibraryLauncher : MonoBehaviour
         return m_HomePanelController;
     }
 
-    private void MarkVlcLaunchPending(bool waitForDeferredVlcReady)
+    private void PrepareVlcLaunch(bool waitForDeferredVlcReady)
     {
-        m_AarLaunchPending = true;
         m_AarVisible = false;
         m_AwaitingPlaybackStartAfterAarReturn = false;
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
         Debug.Log(
-            $"[VlcLibraryLauncher] AAR launch pending; deferredForeground={waitForDeferredVlcReady}.");
+            $"[VlcLibraryLauncher] AAR launch requested; deferredForeground={waitForDeferredVlcReady}.");
     }
 
     private void MarkVlcActivityVisible()
     {
-        m_AarLaunchPending = false;
         m_AarVisible = true;
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
     }
 
-    private void CancelVlcLaunchPending()
+    private void HandleVlcLaunchFailure()
     {
-        m_AarLaunchPending = false;
         m_AarVisible = false;
         if (m_LastObservedXrFocused == true)
             BeginFocusedUiWork();
@@ -594,7 +580,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     /// </summary>
     public void ShowUnityView()
     {
-        m_AarLaunchPending = false;
         m_AarVisible = false;
         m_RestoreAarAfterSystemPanel = false;
         m_AwaitingPlaybackStartAfterAarReturn = true;
@@ -606,7 +591,7 @@ public class VlcLibraryLauncher : MonoBehaviour
     public void OnVlcActivityReady()
     {
         MarkVlcActivityVisible();
-        Debug.Log("[VlcLibraryLauncher] VLC Activity ready; hiding cold start splash when minimum display time is satisfied.");
+        Debug.Log("[VlcLibraryLauncher] VLC Activity started; hiding cold start splash when minimum display time is satisfied.");
         ColdStartSplashOverlay.MarkVlcActivityReady();
     }
 
@@ -755,7 +740,7 @@ public class VlcLibraryLauncher : MonoBehaviour
 
     private void StartVLCActivity(bool deferForegroundUntilColdStartSplashElapsed = false)
     {
-        MarkVlcLaunchPending(deferForegroundUntilColdStartSplashElapsed);
+        PrepareVlcLaunch(deferForegroundUntilColdStartSplashElapsed);
         try
         {
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
@@ -767,7 +752,7 @@ public class VlcLibraryLauncher : MonoBehaviour
         }
         catch (Exception e)
         {
-            CancelVlcLaunchPending();
+            HandleVlcLaunchFailure();
             ColdStartSplashOverlay.Hide();
             Debug.LogError("打开 VLC 媒体库失败: " + e.Message);
         }
