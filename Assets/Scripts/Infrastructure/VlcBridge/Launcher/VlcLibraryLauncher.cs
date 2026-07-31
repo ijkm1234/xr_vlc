@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.Android;
 using UnityEngine.XR.Interaction.Toolkit.Inputs;
 using System;
 using System.Collections;
@@ -39,7 +38,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     private XRInputModalityManager m_ModalityManager;
     private bool? m_LastObservedXrFocused;
     private bool m_HasOpenedVlcLibraryOnStart;
-    private bool m_OpenVlcAfterPermissionGranted;
     private bool m_ExternalMediaLaunchHandled;
     private VlcFocusRestoreHandler m_FocusRestoreHandler;
     private VlcHomePanelController m_HomePanelController;
@@ -49,10 +47,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     private bool m_RestoreAarAfterSystemPanel;
     private bool m_AwaitingPlaybackStartAfterAarReturn;
     private bool m_PlaybackActiveOrStarting;
-#if UNITY_ANDROID
-    private PermissionCallbacks m_PermissionCallbacks;
-#endif
-
     private void Awake()
     {
         if (Instance == null)
@@ -103,7 +97,6 @@ public class VlcLibraryLauncher : MonoBehaviour
 
 #if UNITY_ANDROID
         PicoSessionEvents.SessionStateChanged -= OnSessionStateChanged;
-        ClearPermissionCallbacks();
 #endif
     }
 
@@ -144,9 +137,7 @@ public class VlcLibraryLauncher : MonoBehaviour
         ApplyXrFocusState(
             PXR_Plugin.System.UPxr_GetFocusState(),
             "OnApplicationFocus(true)+PXR query");
-        if (TryConsumeExternalMediaIntent()) return;
-        if (m_ExternalMediaLaunchHandled && !m_OpenVlcAfterPermissionGranted) return;
-        TryOpenVlcAfterPermissionGranted();
+        TryConsumeExternalMediaIntent();
 #else
         // 非 Android 平台没有 PICO session 事件，继续使用 Unity 应用焦点兜底。
         if (objectsToHideWhenVlcOpens == null) return;
@@ -535,7 +526,6 @@ public class VlcLibraryLauncher : MonoBehaviour
         }
 
         m_ExternalMediaLaunchHandled = true;
-        m_OpenVlcAfterPermissionGranted = false;
         EnsureHomePanelController()?.SetVisible(false);
         StartCoroutine(PlayExternalMediaAfterSceneReady(payload));
         return true;
@@ -610,132 +600,7 @@ public class VlcLibraryLauncher : MonoBehaviour
             return;
         }
 
-        if (HasRequiredPermissions())
-        {
-            StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);
-        }
-        else
-        {
-            ColdStartSplashOverlay.Hide();
-            m_OpenVlcAfterPermissionGranted = true;
-            RequestRequiredPermissions();
-            Debug.Log("正在请求 Android 权限，授权后将自动打开 VLC 媒体库。");
-        }
-    }
-
-    private bool HasRequiredPermissions()
-    {
-#if UNITY_ANDROID
-        using (AndroidJavaClass buildVersion = new AndroidJavaClass("android.os.Build$VERSION"))
-        {
-            int sdkInt = buildVersion.GetStatic<int>("SDK_INT");
-            if (sdkInt >= 33)
-            {
-                return Permission.HasUserAuthorizedPermission("android.permission.READ_MEDIA_VIDEO") &&
-                       Permission.HasUserAuthorizedPermission("android.permission.READ_MEDIA_AUDIO") &&
-                       Permission.HasUserAuthorizedPermission("android.permission.POST_NOTIFICATIONS");
-            }
-            else if (sdkInt >= 30)
-            {
-                using (AndroidJavaClass environment = new AndroidJavaClass("android.os.Environment"))
-                {
-                    return environment.CallStatic<bool>("isExternalStorageManager");
-                }
-            }
-            else
-            {
-                return Permission.HasUserAuthorizedPermission(Permission.ExternalStorageRead);
-            }
-        }
-#else
-        return true;
-#endif
-    }
-
-    private void RequestRequiredPermissions()
-    {
-#if UNITY_ANDROID
-        using (AndroidJavaClass buildVersion = new AndroidJavaClass("android.os.Build$VERSION"))
-        {
-            int sdkInt = buildVersion.GetStatic<int>("SDK_INT");
-            if (sdkInt >= 33)
-            {
-                EnsurePermissionCallbacks();
-                Permission.RequestUserPermissions(new string[] {
-                    "android.permission.READ_MEDIA_VIDEO",
-                    "android.permission.READ_MEDIA_AUDIO",
-                    "android.permission.POST_NOTIFICATIONS"
-                }, m_PermissionCallbacks);
-            }
-            else if (sdkInt >= 30)
-            {
-                try
-                {
-                    using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-                    using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
-                    using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent", "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION"))
-                    using (AndroidJavaClass uriClass = new AndroidJavaClass("android.net.Uri"))
-                    {
-                        string packageName = currentActivity.Call<string>("getPackageName");
-                        AndroidJavaObject uri = uriClass.CallStatic<AndroidJavaObject>("parse", "package:" + packageName);
-                        intent.Call<AndroidJavaObject>("setData", uri);
-                        currentActivity.Call("startActivity", intent);
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError("请求所有文件访问权限失败: " + e.Message);
-                    Permission.RequestUserPermission(Permission.ExternalStorageRead);
-                }
-            }
-            else
-            {
-                Permission.RequestUserPermission(Permission.ExternalStorageRead);
-            }
-        }
-#endif
-    }
-
-#if UNITY_ANDROID
-    private void EnsurePermissionCallbacks()
-    {
-        if (m_PermissionCallbacks != null) return;
-
-        m_PermissionCallbacks = new PermissionCallbacks();
-        m_PermissionCallbacks.PermissionGranted += OnRuntimePermissionResolved;
-        m_PermissionCallbacks.PermissionDenied += OnRuntimePermissionResolved;
-        m_PermissionCallbacks.PermissionRequestDismissed += OnRuntimePermissionResolved;
-    }
-
-    private void ClearPermissionCallbacks()
-    {
-        if (m_PermissionCallbacks == null) return;
-
-        m_PermissionCallbacks.PermissionGranted -= OnRuntimePermissionResolved;
-        m_PermissionCallbacks.PermissionDenied -= OnRuntimePermissionResolved;
-        m_PermissionCallbacks.PermissionRequestDismissed -= OnRuntimePermissionResolved;
-        m_PermissionCallbacks = null;
-    }
-
-    private void OnRuntimePermissionResolved(string permissionName)
-    {
-        TryOpenVlcAfterPermissionGranted();
-    }
-#endif
-
-    /// <summary>
-    /// 从权限弹窗或系统设置页回到 Unity 后，如果权限已满足则继续打开 VLC 媒体库。
-    /// </summary>
-    private void TryOpenVlcAfterPermissionGranted()
-    {
-#if UNITY_ANDROID
-        if (!m_OpenVlcAfterPermissionGranted) return;
-        if (!HasRequiredPermissions()) return;
-
-        m_OpenVlcAfterPermissionGranted = false;
-        ClearPermissionCallbacks();
-        StartVLCActivity();
-#endif
+        StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);
     }
 
     private void StartVLCActivity(bool deferForegroundUntilColdStartSplashElapsed = false)

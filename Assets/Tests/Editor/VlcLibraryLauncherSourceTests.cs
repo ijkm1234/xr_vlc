@@ -30,7 +30,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void StartupLaunch_OpensVlcLibraryAfterInitializationAndPermissionReturn()
+        public void StartupLaunch_OpensVlcLibraryWithoutUnityPermissionGate()
         {
             string source = ReadLauncherSource();
 
@@ -38,8 +38,10 @@ namespace XRVLC.Tests
             StringAssert.Contains("StartCoroutine(HandleStartupLaunch());", source);
             StringAssert.Contains("private IEnumerator HandleStartupLaunch()", source);
             StringAssert.Contains("private IEnumerator OpenVlcLibraryOnStart()", source);
-            StringAssert.Contains("m_OpenVlcAfterPermissionGranted = true;", source);
-            StringAssert.Contains("private void TryOpenVlcAfterPermissionGranted()", source);
+            StringAssert.Contains("StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);", source);
+            StringAssert.DoesNotContain("m_OpenVlcAfterPermissionGranted", source);
+            StringAssert.DoesNotContain("RequestRequiredPermissions", source);
+            StringAssert.DoesNotContain("Permission.RequestUserPermissions", source);
         }
 
         [Test]
@@ -61,7 +63,6 @@ namespace XRVLC.Tests
             StringAssert.Contains("private bool m_ExternalMediaLaunchHandled;", source);
             StringAssert.Contains("private bool TryConsumeExternalMediaIntent()", source);
             StringAssert.Contains("m_ExternalMediaLaunchHandled = true;", source);
-            StringAssert.Contains("m_OpenVlcAfterPermissionGranted = false;", source);
             StringAssert.Contains("playbackBridge.StartPlay(payload);", source);
             StringAssert.Contains("private void OnDeepLinkActivated(string url)", source);
 
@@ -69,12 +70,8 @@ namespace XRVLC.Tests
             int focusEnd = source.IndexOf("private VlcFocusRestoreHandler EnsureFocusRestoreHandler()", focusStart, System.StringComparison.Ordinal);
             Assert.Greater(focusEnd, focusStart);
             string focusBlock = source.Substring(focusStart, focusEnd - focusStart);
-            int consumeIndex = focusBlock.IndexOf("if (TryConsumeExternalMediaIntent()) return;", System.StringComparison.Ordinal);
-            int handledIndex = focusBlock.IndexOf("if (m_ExternalMediaLaunchHandled && !m_OpenVlcAfterPermissionGranted) return;", System.StringComparison.Ordinal);
-            int permissionIndex = focusBlock.IndexOf("TryOpenVlcAfterPermissionGranted();", System.StringComparison.Ordinal);
-            Assert.GreaterOrEqual(consumeIndex, 0);
-            Assert.Greater(handledIndex, consumeIndex);
-            Assert.Greater(permissionIndex, handledIndex);
+            StringAssert.Contains("TryConsumeExternalMediaIntent();", focusBlock);
+            StringAssert.DoesNotContain("TryOpenVlcAfterPermissionGranted", focusBlock);
         }
 
         [Test]
@@ -170,7 +167,8 @@ namespace XRVLC.Tests
             int nextMethod = source.IndexOf("private VlcFocusRestoreHandler EnsureFocusRestoreHandler()", focusStart, System.StringComparison.Ordinal);
             string focusBlock = source.Substring(focusStart, nextMethod - focusStart);
 
-            StringAssert.Contains("TryOpenVlcAfterPermissionGranted();", focusBlock);
+            StringAssert.Contains("TryConsumeExternalMediaIntent();", focusBlock);
+            StringAssert.DoesNotContain("TryOpenVlcAfterPermissionGranted", focusBlock);
             StringAssert.Contains("EnsureFocusRestoreHandler().HideControllers();", focusBlock);
             StringAssert.Contains("EnsureFocusRestoreHandler().TriggerRestore();", focusBlock);
         }
