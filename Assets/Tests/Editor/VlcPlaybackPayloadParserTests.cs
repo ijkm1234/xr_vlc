@@ -944,7 +944,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void AndroidBridge_RoutesFisheyeAndChromaKeyThroughSurfaceMapper()
+        public void AndroidBridge_RoutesAllVideoThroughPersistentSurfaceMapper()
         {
             string bridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
             string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
@@ -952,7 +952,12 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("fun setVideoSurfaceMapping(fisheyeMappingEnabled: Boolean, chromaKeyEnabled: Boolean, stereo: Int, contentWidth: Int, contentHeight: Int)", bridgeSource);
             StringAssert.Contains("private var surfaceMapper: XrSurfaceMapper? = null", bridgeSource);
-            StringAssert.Contains("fisheyeMappingEnabled || chromaKeyEnabled", bridgeSource);
+            StringAssert.Contains("private var boundVideoInputSurface: Surface? = null", bridgeSource);
+            StringAssert.Contains("configurePersistentSurfaceMapper(outputSurface)", bridgeSource);
+            StringAssert.Contains("preserveMapperInput", bridgeSource);
+            StringAssert.Contains("mapperInput === boundVideoInputSurface", bridgeSource);
+            StringAssert.Contains(".detachOutput()", bridgeSource);
+            StringAssert.DoesNotContain("mapping-disabled-resolve", bridgeSource);
             int configureStart = bridgeSource.IndexOf("mapper.configure(", System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(configureStart, 0);
             int configureEnd = bridgeSource.IndexOf(')', configureStart);
@@ -974,6 +979,9 @@ namespace XRVLC.Tests
             StringAssert.Contains("#define XR_FISHEYE_PRECISION highp", mapperSource);
             StringAssert.Contains("varying highp vec2 vUv", mapperSource);
             StringAssert.Contains("fun configure(output: Surface, fisheyeMappingEnabled: Boolean, chromaKeyEnabled: Boolean, stereo: Int, width: Int, height: Int)", mapperSource);
+            StringAssert.Contains("fun detachOutput()", mapperSource);
+            StringAssert.Contains("detachOutputOnRenderThread()", mapperSource);
+            StringAssert.Contains("frameAvailablePending", mapperSource);
             StringAssert.Contains("SurfaceTexture.OnFrameAvailableListener", mapperSource);
             StringAssert.Contains("theta = acos", mapperSource);
             StringAssert.Contains("float fisheyeRadius(float theta)", mapperSource);
@@ -1026,7 +1034,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void AndroidBridge_FallsBackToDirectSurfaceWhenMapperRenderingFails()
+        public void AndroidBridge_PreservesBoundMapperInputWhenRenderingFails()
         {
             string bridgeSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt"));
             string mapperSource = File.ReadAllText(ProjectFile("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt"));
@@ -1048,10 +1056,12 @@ namespace XRVLC.Tests
             string handlerBlock = bridgeSource.Substring(handlerStart, handlerEnd - handlerStart);
             StringAssert.Contains("mainHandler.post", handlerBlock);
             StringAssert.Contains("if (surfaceMapper !== mapper) return@post", handlerBlock);
-            StringAssert.Contains("videoSurfaceFisheyeMappingEnabled = false", handlerBlock);
-            StringAssert.Contains("videoSurfaceChromaKeyEnabled = false", handlerBlock);
+            StringAssert.Contains("val inputStillBound = mapper.inputSurface === boundVideoInputSurface", handlerBlock);
+            StringAssert.Contains("playbackService?.pause()", handlerBlock);
+            StringAssert.Contains("if (inputStillBound)", handlerBlock);
             StringAssert.Contains("releaseSurfaceMapper(", handlerBlock);
-            StringAssert.Contains("configureVoutSurfacesSafely(", handlerBlock);
+            StringAssert.DoesNotContain("videoSurfaceFisheyeMappingEnabled = false", handlerBlock);
+            StringAssert.DoesNotContain("videoSurfaceChromaKeyEnabled = false", handlerBlock);
         }
 
         [Test]
