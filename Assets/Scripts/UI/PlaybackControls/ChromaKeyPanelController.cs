@@ -615,7 +615,9 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private static Texture2D BuildHueTexture()
     {
         const int height = 256;
-        var texture = new Texture2D(1, height, TextureFormat.RGB24, false, true)
+        // Keep the hue spectrum in the same sRGB display space as the picker
+        // palette, preview Image and hexadecimal color value.
+        var texture = new Texture2D(1, height, TextureFormat.RGB24, false, false)
         {
             name = "ChromaKeyHueSpectrum",
             wrapMode = TextureWrapMode.Clamp,

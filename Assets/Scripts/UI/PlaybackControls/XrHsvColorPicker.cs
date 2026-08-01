@@ -35,7 +35,9 @@ public sealed class XrHsvColorPicker : MonoBehaviour, IPointerDownHandler, IDrag
         image.preserveAspect = true;
         image.raycastTarget = false;
 
-        _texture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGB24, false, true)
+        // HSV values represent display (sRGB) colors. Marking this texture as
+        // linear makes the palette brighter than Image.color in a Linear project.
+        _texture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGB24, false, false)
         {
             name = "ChromaKeySaturationValue",
             wrapMode = TextureWrapMode.Clamp,
