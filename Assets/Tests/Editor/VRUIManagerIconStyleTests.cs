@@ -1006,7 +1006,7 @@ namespace XRVLC.Tests
 
             int backgroundIndex = promoteMethod.IndexOf("videoScreen.EnterPlaybackBackground()", System.StringComparison.Ordinal);
             int mediaChangedIndex = promoteMethod.IndexOf("OnMediaChanged?.Invoke(CurrentMedia, 0)", System.StringComparison.Ordinal);
-            int rebuildIndex = promoteMethod.IndexOf("RebuildAndApplyGeometry(videoSize, request.MediaRequestId)", System.StringComparison.Ordinal);
+            int rebuildIndex = promoteMethod.IndexOf("RequestRebuildLayer(videoSize, request.MediaRequestId)", System.StringComparison.Ordinal);
             Assert.GreaterOrEqual(backgroundIndex, 0);
             Assert.Greater(mediaChangedIndex, backgroundIndex);
             Assert.Greater(rebuildIndex, mediaChangedIndex);

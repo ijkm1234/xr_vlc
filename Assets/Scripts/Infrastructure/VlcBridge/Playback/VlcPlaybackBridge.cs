@@ -185,37 +185,59 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
-    public static void BeginVideoOutputDetach(long switchToken)
+    public static void BeginRebuildLayer(long switchToken, long mediaRequestId, bool rebuildInput, bool rebuildOutput)
     {
-        SurfaceDebug($"video_output_switch begin_detach token={switchToken}");
+        SurfaceDebug(
+            $"video_layer begin operation=RebuildLayer token={switchToken} mediaRequest={mediaRequestId} " +
+            $"rebuildInput={rebuildInput} rebuildOutput={rebuildOutput}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
             using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
-                bridge.CallStatic("beginVideoOutputDetach", switchToken);
+                bridge.CallStatic("beginRebuildLayer", switchToken, mediaRequestId, rebuildInput, rebuildOutput);
         }
         catch (Exception e)
         {
-            Debug.LogError($"[VlcPlaybackBridge] BeginVideoOutputDetach failed: {e.Message}");
-            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|begin-detach-jni");
+            Debug.LogError($"[VlcPlaybackBridge] BeginRebuildLayer failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|begin-rebuild-jni");
         }
 #else
         OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|detached");
 #endif
     }
 
-    public static void AttachVideoOutput(
+    public static void BeginChangeLayer(long switchToken, bool rebuildOutput)
+    {
+        SurfaceDebug($"video_layer begin operation=ChangeLayer token={switchToken} rebuildOutput={rebuildOutput}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("beginChangeLayer", switchToken, rebuildOutput);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] BeginChangeLayer failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|begin-change-jni");
+        }
+#else
+        OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|detached");
+#endif
+    }
+
+    public static void AttachRebuildLayer(
         long switchToken,
         long mediaRequestId,
         IntPtr surfacePtr,
         bool fisheyeMappingEnabled,
         bool chromaKeyEnabled,
+        bool resumeCurrentMedia,
         StereoMode stereo,
         uint contentWidth,
         uint contentHeight)
     {
         SurfaceDebug(
-            $"video_output_switch attach token={switchToken} mediaRequest={mediaRequestId} surface={surfacePtr} " +
+            $"video_layer attach operation=RebuildLayer token={switchToken} mediaRequest={mediaRequestId} surface={surfacePtr} " +
             $"fisheye={fisheyeMappingEnabled} chroma={chromaKeyEnabled} stereo={stereo} " +
             $"content={contentWidth}x{contentHeight}");
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -231,26 +253,78 @@ public class VlcPlaybackBridge : MonoBehaviour
 
             IntPtr attachMethod = AndroidJNI.GetStaticMethodID(
                 bridgeClass,
-                "attachVideoOutput",
-                "(JJLandroid/view/Surface;ZZIII)V");
+                "attachRebuildLayer",
+                "(JJLandroid/view/Surface;ZZZIII)V");
             if (attachMethod == IntPtr.Zero)
-                throw new InvalidOperationException("attachVideoOutput method not found");
+                throw new InvalidOperationException("attachRebuildLayer method not found");
 
-            jvalue[] args = new jvalue[8];
+            jvalue[] args = new jvalue[9];
             args[0].j = switchToken;
             args[1].j = mediaRequestId;
             args[2].l = surfacePtr;
             args[3].z = fisheyeMappingEnabled;
             args[4].z = chromaKeyEnabled;
-            args[5].i = (int)stereo;
-            args[6].i = (int)contentWidth;
-            args[7].i = (int)contentHeight;
+            args[5].z = resumeCurrentMedia;
+            args[6].i = (int)stereo;
+            args[7].i = (int)contentWidth;
+            args[8].i = (int)contentHeight;
             AndroidJNI.CallStaticVoidMethod(bridgeClass, attachMethod, args);
         }
         catch (Exception e)
         {
-            Debug.LogError($"[VlcPlaybackBridge] AttachVideoOutput failed: {e.Message}");
-            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|attach-jni");
+            Debug.LogError($"[VlcPlaybackBridge] AttachRebuildLayer failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|attach-rebuild-jni");
+        }
+#else
+        OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|ready");
+#endif
+    }
+
+    public static void AttachChangeLayer(
+        long switchToken,
+        IntPtr surfacePtr,
+        bool fisheyeMappingEnabled,
+        bool chromaKeyEnabled,
+        StereoMode stereo,
+        uint contentWidth,
+        uint contentHeight)
+    {
+        SurfaceDebug(
+            $"video_layer attach operation=ChangeLayer token={switchToken} surface={surfacePtr} " +
+            $"fisheye={fisheyeMappingEnabled} chroma={chromaKeyEnabled} stereo={stereo} " +
+            $"content={contentWidth}x{contentHeight}");
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            int attachResult = AndroidJNI.AttachCurrentThread();
+            if (attachResult != 0)
+                throw new InvalidOperationException($"AttachCurrentThread returned {attachResult}");
+
+            IntPtr bridgeClass = AndroidJNI.FindClass("org/videolan/vlc/bridge/PlaybackServiceBridge");
+            if (bridgeClass == IntPtr.Zero)
+                throw new InvalidOperationException("PlaybackServiceBridge class not found");
+
+            IntPtr attachMethod = AndroidJNI.GetStaticMethodID(
+                bridgeClass,
+                "attachChangeLayer",
+                "(JLandroid/view/Surface;ZZIII)V");
+            if (attachMethod == IntPtr.Zero)
+                throw new InvalidOperationException("attachChangeLayer method not found");
+
+            jvalue[] args = new jvalue[7];
+            args[0].j = switchToken;
+            args[1].l = surfacePtr;
+            args[2].z = fisheyeMappingEnabled;
+            args[3].z = chromaKeyEnabled;
+            args[4].i = (int)stereo;
+            args[5].i = (int)contentWidth;
+            args[6].i = (int)contentHeight;
+            AndroidJNI.CallStaticVoidMethod(bridgeClass, attachMethod, args);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] AttachChangeLayer failed: {e.Message}");
+            OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|failed|attach-change-jni");
         }
 #else
         OnVideoOutputSwitchEventReceived?.Invoke($"{switchToken}|ready");
@@ -269,6 +343,36 @@ public class VlcPlaybackBridge : MonoBehaviour
         catch (Exception e)
         {
             Debug.LogWarning($"[VlcPlaybackBridge] CancelVideoOutputSwitch failed: {e.Message}");
+        }
+#endif
+    }
+
+    public static void CancelPendingMediaRequests()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("cancelPendingMediaRequests");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] CancelPendingMediaRequests failed: {e.Message}");
+        }
+#endif
+    }
+
+    public static void CancelPendingMediaRequest(long mediaRequestId)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("cancelPendingMediaRequest", mediaRequestId);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] CancelPendingMediaRequest failed: {e.Message}");
         }
 #endif
     }

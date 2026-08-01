@@ -21,7 +21,7 @@ namespace XRVLC
         /// <summary>
         /// 用于 VR 视频：改变底层的几何体形状和 3D 分屏模式
         /// </summary>
-        void SetGeometry(VideoProjection projection, StereoMode stereo,
+        void ChangeLayer(VideoProjection projection, StereoMode stereo,
                          FlatVideoCurveMode curveMode = FlatVideoCurveMode.None);
 
         /// <summary>

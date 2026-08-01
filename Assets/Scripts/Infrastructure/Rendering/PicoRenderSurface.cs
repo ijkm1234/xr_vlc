@@ -172,7 +172,7 @@ namespace XRVLC
             }
         }
 
-        public void SetGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
+        public void ChangeLayer(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
         {
             if (_compLayer == null) return;
             BindCompositionLayerPose();

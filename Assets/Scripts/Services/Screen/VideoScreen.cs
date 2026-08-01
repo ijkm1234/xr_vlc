@@ -281,7 +281,7 @@ namespace XRVLC
         /// <summary>
         /// 设置投影模式并调整场景层级
         /// </summary>
-        public void SetGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
+        public void ChangeLayer(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode = FlatVideoCurveMode.None)
         {
             _currentProjection = projection;
             _currentStereo = stereo;
@@ -302,7 +302,7 @@ namespace XRVLC
             }
 
             // 2. 调度底层渲染表面
-            _renderSurface?.SetGeometry(projection, stereo, curveMode);
+            _renderSurface?.ChangeLayer(projection, stereo, curveMode);
         }
 
         public void SetPassthroughBackgroundEnabled(bool enabled)

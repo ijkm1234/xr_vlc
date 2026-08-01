@@ -10,46 +10,47 @@ namespace XRVLC.Tests
     public class PlaybackServiceManualGeometryTests
     {
         [Test]
-        public void LoadAndPlay_ClearsManualGeometryOverrideForNewMedia()
+        public void ParsedMediaPromotion_ClearsManualGeometryOverrideForNewMedia()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string method = ExtractMethod(source, "LoadAndPlay");
+            string method = ExtractMethod(source, "StartNextParsedPlaybackRequest", "private void");
 
             StringAssert.Contains("_hasManualGeometryOverride = false", method);
         }
 
         [Test]
-        public void SetManualVideoGeometry_RebuildsWhenStereoLayoutChanges()
+        public void SetManualVideoGeometry_UsesChangeLayerTransaction()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
             string method = ExtractMethod(source, "SetManualVideoGeometry");
 
-            StringAssert.Contains("ShouldRebuildForManualGeometryChange", method);
-            StringAssert.Contains("RebuildAndApplyGeometry", method);
+            StringAssert.Contains("RequestChangeLayer()", method);
+            StringAssert.DoesNotContain("RequestRebuildLayer", method);
         }
 
         [Test]
-        public void SetManualVideoGeometry_CanUpdateExistingLayerWithoutRebuild()
+        public void ChangeLayer_CanUpdateExistingPicoLayerWithoutRebuild()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string method = ExtractMethod(source, "SetManualVideoGeometry");
+            string method = ExtractMethod(source, "ChangeLayer", "private IEnumerator");
 
-            StringAssert.Contains("ApplyManualGeometryWithoutRebuild", method);
+            StringAssert.Contains("ApplyLayerGeometryWithoutRebuild", method);
+            StringAssert.Contains("VlcPlaybackBridge.BeginChangeLayer", method);
         }
 
         [Test]
-        public void ManualGeometryChange_RebuildsWhenProjectionStereoOrCurveChanges()
+        public void ChangeLayer_RebuildsOutputOnlyWhenOutputSpecChanges()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string method = ExtractMethod(source, "ShouldRebuildForManualGeometryChange", "private static bool");
+            string method = ExtractMethod(source, "ChangeLayer", "private IEnumerator");
 
-            StringAssert.Contains("previousGeometry.Projection != nextGeometry.Projection", method);
-            StringAssert.Contains("previousGeometry.Stereo != nextGeometry.Stereo", method);
-            StringAssert.Contains("previousGeometry.CurveMode != nextGeometry.CurveMode", method);
+            StringAssert.Contains("VideoLayerPlanner.NeedsOutputRebuild", method);
+            StringAssert.Contains("if (rebuildOutput)", method);
+            StringAssert.Contains("_geometryService.Rebuild", method);
         }
 
         [Test]
@@ -241,18 +242,18 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void PlaybackService_IgnoresMediaParseCallbacksForOtherMediaUri()
+        public void PlaybackService_IgnoresMediaParseCallbacksForUnknownRequest()
         {
             string playbackPath = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string playbackSource = File.ReadAllText(playbackPath);
             string method = ExtractMethod(playbackSource, "HandleMediaParseFinished", "private void");
 
-            StringAssert.Contains("if (!IsCurrentMediaUri(result.uri))", method);
-            StringAssert.Contains("Ignoring media parse callback for stale uri", method);
+            StringAssert.Contains("FindPendingPlaybackRequest(result.MediaRequestId)", method);
+            StringAssert.Contains("if (request == null)", method);
             Assert.Less(
-                method.IndexOf("if (!IsCurrentMediaUri(result.uri))", System.StringComparison.Ordinal),
-                method.IndexOf("SetCurrentVideoSize(videoSize)", System.StringComparison.Ordinal),
-                "URI ownership must be checked before a parse callback can update current video size.");
+                method.IndexOf("if (request == null)", System.StringComparison.Ordinal),
+                method.IndexOf("request.ParseResult = result", System.StringComparison.Ordinal),
+                "Request ownership must be checked before a parse result can be promoted.");
         }
 
         [Test]
@@ -287,12 +288,12 @@ namespace XRVLC.Tests
             string method = ExtractMethod(playbackSource, "OnVideoSizeChanged", "private void");
 
             StringAssert.Contains("private void OnVideoSizeChanged(VlcVideoSize videoSize)", playbackSource);
-            StringAssert.Contains("if (!videoSize.IsValid) return;", method);
+            StringAssert.Contains("if (!videoSize.IsValid)", method);
             StringAssert.DoesNotContain("IsCurrentMediaUri(payload.uri)", method);
             StringAssert.DoesNotContain("Ignoring video size callback for stale uri", method);
             Assert.Less(
-                method.IndexOf("if (!videoSize.IsValid) return;", System.StringComparison.Ordinal),
-                method.IndexOf("RebuildAndApplyGeometry(videoSize)", System.StringComparison.Ordinal),
+                method.IndexOf("if (!videoSize.IsValid)", System.StringComparison.Ordinal),
+                method.IndexOf("RequestRebuildLayer(videoSize)", System.StringComparison.Ordinal),
                 "Invalid size callbacks, including 0x0 layout resets, must be ignored before any surface rebuild can run.");
         }
 
@@ -389,29 +390,29 @@ namespace XRVLC.Tests
             string geometryPath = Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreenGeometryService.cs");
             string playbackSource = File.ReadAllText(playbackPath);
             string geometrySource = File.ReadAllText(geometryPath);
-            string rebuildMethod = ExtractMethod(playbackSource, "RebuildGeometryAndSubtitleSurface", "private IEnumerator");
-            string bindVideoMethod = ExtractMethod(playbackSource, "BindVideoSurface", "private void");
+            string rebuildMethod = ExtractMethod(playbackSource, "RebuildLayer", "private IEnumerator");
+            string attachVideoMethod = ExtractMethod(playbackSource, "AttachRebuildLayer", "private bool");
             string bindSubtitleMethod = ExtractMethod(playbackSource, "BindSubtitleSurface", "private void");
             string subtitleBindingRoutine = ExtractMethod(playbackSource, "UpdateNativeSubtitleSurfaceBindingRoutine", "private IEnumerator");
 
-            StringAssert.Contains("bool shouldRebuildVideoSurface = ShouldRebuildVideoSurface(videoSpec)", rebuildMethod);
-            StringAssert.Contains("if (shouldRebuildVideoSurface)", rebuildMethod);
-            StringAssert.Contains("_geometryService.Rebuild(videoSize, videoSpec.ChromaKeyEnabled);", rebuildMethod);
-            StringAssert.Contains("BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec", rebuildMethod);
-            StringAssert.Contains("WaitForVideoAndSubtitleSurfaces(shouldRebuildVideoSurface, shouldBindSubtitleSurface)", rebuildMethod);
-            StringAssert.Contains("BindVideoSurface(videoSpec)", rebuildMethod);
+            StringAssert.Contains("VideoLayerPlanner.NeedsOutputRebuild", rebuildMethod);
+            StringAssert.Contains("if (rebuildOutput)", rebuildMethod);
+            StringAssert.Contains("_geometryService.Rebuild(videoSize, layerSpec.Mapper.ChromaKeyEnabled);", rebuildMethod);
+            StringAssert.Contains("BeginNativeSubtitleSurfaceRebuild(out subtitleSpec", rebuildMethod);
+            StringAssert.Contains("rebuildOutput", rebuildMethod);
+            StringAssert.Contains("AttachRebuildLayer(token, mediaRequestId, layerSpec, wasPlaying)", rebuildMethod);
             StringAssert.Contains("BindSubtitleSurface(subtitleSpec)", rebuildMethod);
             Assert.Less(
                 rebuildMethod.IndexOf("BindSubtitleSurface(subtitleSpec)", System.StringComparison.Ordinal),
-                rebuildMethod.IndexOf("BindVideoSurface(videoSpec)", System.StringComparison.Ordinal),
+                rebuildMethod.IndexOf("AttachRebuildLayer(token, mediaRequestId, layerSpec, wasPlaying)", System.StringComparison.Ordinal),
                 "Subtitle surface should be bound before the video surface so Android's first vout attach sees the complete surface set.");
 
-            StringAssert.Contains("VlcPlaybackBridge.SetSurface(videoSurfacePtr);", bindVideoMethod);
-            StringAssert.DoesNotContain("VlcPlaybackBridge.SetSubtitleSurface", bindVideoMethod);
+            StringAssert.Contains("VlcPlaybackBridge.AttachRebuildLayer(", attachVideoMethod);
+            StringAssert.DoesNotContain("VlcPlaybackBridge.SetSubtitleSurface", attachVideoMethod);
             StringAssert.Contains("VlcPlaybackBridge.SetSubtitleSurface(subtitleSurfacePtr);", bindSubtitleMethod);
             StringAssert.DoesNotContain("VlcPlaybackBridge.SetSurface", bindSubtitleMethod);
             StringAssert.DoesNotContain("VlcPlaybackBridge.DetachSurface", bindSubtitleMethod);
-            StringAssert.DoesNotContain("BindVideoSurface", subtitleBindingRoutine);
+            StringAssert.DoesNotContain("AttachRebuildLayer", subtitleBindingRoutine);
             StringAssert.DoesNotContain("SetSurface", subtitleBindingRoutine);
 
             StringAssert.Contains("public void Rebuild(VlcVideoSize videoSize, bool useTextureAlphaBlending)", geometrySource);
@@ -438,21 +439,16 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void PlaybackService_EnablesSurfaceMapperForFisheyeOrChromaKey()
+        public void PlaybackService_AttachTransactionsAlwaysConfigureMapper()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string bindVideoMethod = ExtractMethod(source, "BindVideoSurface", "private void");
+            string attachVideoMethod = ExtractMethod(source, "AttachRebuildLayer", "private bool");
             string detachVideoMethod = ExtractMethod(source, "DetachVideoSurfaceFromVlc", "private void");
 
-            StringAssert.Contains("bool fisheyeMappingEnabled = videoSpec.Projection == VideoProjection.Fisheye180", bindVideoMethod);
-            StringAssert.Contains("VlcPlaybackBridge.SetVideoSurfaceMapping(", bindVideoMethod);
-            StringAssert.Contains("fisheyeMappingEnabled", bindVideoMethod);
-            StringAssert.Contains("videoSpec.ChromaKeyEnabled", bindVideoMethod);
-            Assert.Less(
-                bindVideoMethod.IndexOf("VlcPlaybackBridge.SetVideoSurfaceMapping(", System.StringComparison.Ordinal),
-                bindVideoMethod.IndexOf("VlcPlaybackBridge.SetSurface(videoSurfacePtr)", System.StringComparison.Ordinal),
-                "Mapping must be configured before the output Surface is handed to Android.");
+            StringAssert.Contains("VlcPlaybackBridge.AttachRebuildLayer(", attachVideoMethod);
+            StringAssert.Contains("layerSpec.Mapper.FisheyeMappingEnabled", attachVideoMethod);
+            StringAssert.Contains("layerSpec.Mapper.ChromaKeyEnabled", attachVideoMethod);
 
             StringAssert.Contains("private static bool IsFisheyeProjection(VideoProjection projection)", source);
             StringAssert.Contains("DetachVideoSurfaceFromVlc()", source);
@@ -464,19 +460,22 @@ namespace XRVLC.Tests
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string createSpecMethod = ExtractMethod(source, "CreateVideoSurfaceSpec", "private VideoSurfaceSpec");
-            string loadAndPlayMethod = ExtractMethod(source, "LoadAndPlay", "public void");
+            string layerPlanningSource = File.ReadAllText(Path.Combine(
+                Application.dataPath,
+                "Scripts/Domain/Playback/VideoLayerPlanning.cs"));
+            string createSpecMethod = ExtractMethod(source, "CreateVideoLayerSpec", "private VideoLayerSpec");
+            string promoteMethod = ExtractMethod(source, "StartNextParsedPlaybackRequest", "private void");
             string setEnabledMethod = ExtractMethod(source, "SetChromaKeyEnabled", "public void");
 
             StringAssert.Contains("_chromaKeySettings.Enabled", createSpecMethod);
-            StringAssert.Contains("_chromaKeySettings = ChromaKeySettings.Default", loadAndPlayMethod);
-            StringAssert.Contains("OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings)", loadAndPlayMethod);
+            StringAssert.Contains("_chromaKeySettings = ChromaKeySettings.Default", promoteMethod);
+            StringAssert.Contains("OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings)", promoteMethod);
             StringAssert.Contains("_chromaKeySettings.WithEnabled(enabled)", setEnabledMethod);
             StringAssert.DoesNotContain("ShouldEnableChromaKey", source);
             StringAssert.DoesNotContain("Path.GetFileName", source);
-            StringAssert.Contains("ChromaKeyEnabled = chromaKeyEnabled", source);
-            StringAssert.Contains("public bool ChromaKeyEnabled { get; }", source);
-            StringAssert.Contains("ChromaKeyEnabled == other.ChromaKeyEnabled", source);
+            StringAssert.Contains("ChromaKeyEnabled = chromaKeyEnabled", layerPlanningSource);
+            StringAssert.Contains("public bool ChromaKeyEnabled { get; }", layerPlanningSource);
+            StringAssert.Contains("ChromaKeyEnabled == other.ChromaKeyEnabled", layerPlanningSource);
         }
 
         [Test]
@@ -626,14 +625,14 @@ namespace XRVLC.Tests
                 screenType.GetField("videoAnchor").SetValue(screen, anchor.transform);
                 screenType.GetField("backgroundBoard").SetValue(screen, background.transform);
 
-                screenType.GetMethod("SetGeometry").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Small });
+                screenType.GetMethod("ChangeLayer").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Small });
                 screenType.GetMethod("FitVideoSize").Invoke(screen, new object[] { 1920u, 1080u, 0f });
 
                 Assert.That(anchor.transform.localScale.x, Is.EqualTo(16f).Within(0.001f));
                 Assert.That(anchor.transform.localScale.y, Is.EqualTo(9f).Within(0.001f));
                 Assert.That(anchor.transform.localScale.z, Is.EqualTo(32f).Within(0.001f));
 
-                screenType.GetMethod("SetGeometry").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
+                screenType.GetMethod("ChangeLayer").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
                 screenType.GetMethod("FitVideoSize").Invoke(screen, new object[] { 1920u, 1080u, 0f });
 
                 Assert.That(anchor.transform.localScale.x, Is.EqualTo(16f).Within(0.001f));
@@ -647,7 +646,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void SetGeometry_CylinderOffsetsLayerCenterSoSurfaceMatchesFlatPosition()
+        public void ChangeLayer_CylinderOffsetsLayerCenterSoSurfaceMatchesFlatPosition()
         {
             System.Type screenType = System.Type.GetType("XRVLC.VideoScreen, Assembly-CSharp");
             Assert.IsNotNull(screenType, "VideoScreen type should be available in Assembly-CSharp.");
@@ -667,7 +666,7 @@ namespace XRVLC.Tests
                 screenType.GetField("videoAnchor").SetValue(screen, anchor.transform);
                 screenType.GetField("backgroundBoard").SetValue(screen, background.transform);
 
-                screenType.GetMethod("SetGeometry").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
+                screenType.GetMethod("ChangeLayer").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
 
                 Vector3 expectedSurfaceCenter = background.transform.position + background.transform.forward * -0.001f;
                 Vector3 actualSurfaceCenter = anchor.transform.position + anchor.transform.forward * XRVLC.FlatVideoCurveMetrics.LargeCurveCylinderRadius;
@@ -700,7 +699,7 @@ namespace XRVLC.Tests
                 screenType.GetField("videoAnchor").SetValue(screen, anchor.transform);
                 screenType.GetField("backgroundBoard").SetValue(screen, background.transform);
 
-                screenType.GetMethod("SetGeometry").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
+                screenType.GetMethod("ChangeLayer").Invoke(screen, new object[] { XRVLC.VideoProjection.Cylinder, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.Large });
                 screenType.GetMethod("FitVideoSize").Invoke(screen, new object[] { 1920u, 1080u, 0f });
                 screenType.GetMethod("ApplyFlatZoomDelta").Invoke(screen, new object[] { -2f });
 
@@ -740,7 +739,7 @@ namespace XRVLC.Tests
                 screenType.GetField("videoAnchor").SetValue(screen, anchor.transform);
                 screenType.GetField("backgroundBoard").SetValue(screen, background.transform);
 
-                screenType.GetMethod("SetGeometry").Invoke(screen, new object[] { XRVLC.VideoProjection.Flat, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.None });
+                screenType.GetMethod("ChangeLayer").Invoke(screen, new object[] { XRVLC.VideoProjection.Flat, XRVLC.StereoMode.Mono, XRVLC.FlatVideoCurveMode.None });
                 screenType.GetMethod("FitVideoSize").Invoke(screen, new object[] { 1920u, 1080u, 0f });
                 screenType.GetMethod("ApplyFlatZoomDelta").Invoke(screen, new object[] { -2f });
 

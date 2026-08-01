@@ -69,10 +69,18 @@ namespace XRVLC.Media
         private long _activeVideoOutputSwitchToken;
         private long _activeMediaRequestId;
         private VideoOutputSwitchState _videoOutputSwitchState;
-        private VideoSurfaceSpec? _boundVideoSurfaceSpec;
+        private string _videoOutputSwitchFailureReason;
+        private InputLayerSpec? _boundInputLayerSpec;
+        private MapperSpec? _boundMapperSpec;
+        private OutputLayerSpec? _boundOutputLayerSpec;
         private SubtitleSurfaceSpec? _boundSubtitleSurfaceSpec;
         private bool _videoSurfaceBoundToVlc;
         private bool _subtitleSurfaceBoundToVlc;
+        private bool _pendingChangeLayer;
+        private bool _hasPendingRebuildLayer;
+        private VlcVideoSize _pendingRebuildVideoSize;
+        private long _pendingRebuildMediaRequestId;
+        private bool _resumeAfterInputLayerRecovery;
         private readonly Queue<PendingPlaybackRequest> _pendingPlaybackRequests =
             new Queue<PendingPlaybackRequest>();
         private VlcVideoSize CurrentVideoSize =>
@@ -82,8 +90,8 @@ namespace XRVLC.Media
             _chromaKeySettings.Enabled
             && _geometryBindingCoroutine == null
             && _videoSurfaceBoundToVlc
-            && _boundVideoSurfaceSpec.HasValue
-            && _boundVideoSurfaceSpec.Value.ChromaKeyEnabled;
+            && _boundMapperSpec.HasValue
+            && _boundMapperSpec.Value.ChromaKeyEnabled;
 
         private enum VideoOutputSwitchState
         {
@@ -93,13 +101,6 @@ namespace XRVLC.Media
             AwaitReady,
             Ready,
             Failed
-        }
-
-        private enum VideoOutputRebindKind
-        {
-            GeometryOnly,
-            ReuseLayer,
-            RebuildLayer
         }
 
         private sealed class PendingPlaybackRequest
@@ -296,7 +297,9 @@ namespace XRVLC.Media
 
         private void StartNextParsedPlaybackRequest()
         {
-            if (_activeMediaRequestId != 0L || _pendingPlaybackRequests.Count == 0)
+            if (_geometryBindingCoroutine != null
+                || _activeMediaRequestId != 0L
+                || _pendingPlaybackRequests.Count == 0)
                 return;
 
             PendingPlaybackRequest request = _pendingPlaybackRequests.Peek();
@@ -321,6 +324,10 @@ namespace XRVLC.Media
                 _ => MediaProjectionType.Flat2D
             };
             _hasManualGeometryOverride = false;
+            _pendingChangeLayer = false;
+            _hasPendingRebuildLayer = false;
+            _pendingRebuildMediaRequestId = 0L;
+            _resumeAfterInputLayerRecovery = false;
             _fisheyeProjectionFormula = FisheyeProjectionFormula.Equidistant;
             _chromaKeySettings = ChromaKeySettings.Default;
             _manualGeometrySelection = new VideoGeometrySelection(VideoProjection.Flat, StereoMode.Mono, FlatVideoCurveMode.None);
@@ -332,7 +339,7 @@ namespace XRVLC.Media
             SurfaceDebug(
                 $"parse_finished start_head request={request.MediaRequestId} uri={RedactForLog(CurrentMedia.Uri)} " +
                 $"content={videoSize.ContentWidth}x{videoSize.ContentHeight} duration={CurrentMedia.DurationMs}");
-            RebuildAndApplyGeometry(videoSize, request.MediaRequestId);
+            RequestRebuildLayer(videoSize, request.MediaRequestId);
         }
 
         private void CompleteActivePlaybackRequest(long mediaRequestId, string reason)
@@ -378,10 +385,10 @@ namespace XRVLC.Media
 
             VlcVideoSize previousSize = CurrentVideoSize;
             VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
-            VideoSurfaceSpec nextVideoSpec = CreateVideoSurfaceSpec(videoSize, nextGeometry);
+            VideoLayerSpec nextVideoSpec = CreateVideoLayerSpec(videoSize, nextGeometry);
             bool contentUnchanged = previousSize.IsValid && HasSameContentDimensions(previousSize, videoSize);
             bool geometryUnchanged = HasSameGeometry(_currentGeometrySelection, nextGeometry);
-            bool surfaceAlreadyCurrent = _geometryBindingCoroutine != null || IsVideoSurfaceCurrent(nextVideoSpec);
+            bool surfaceAlreadyCurrent = _geometryBindingCoroutine != null || IsVideoLayerCurrent(nextVideoSpec);
             SurfaceDebug(
                 $"layout_callback decision contentUnchanged={contentUnchanged} geometryUnchanged={geometryUnchanged} " +
                 $"surfaceAlreadyCurrent={surfaceAlreadyCurrent} coroutineActive={_geometryBindingCoroutine != null} " +
@@ -403,32 +410,60 @@ namespace XRVLC.Media
 
             Debug.Log($"[PlaybackService] OnVideoSizeChanged (矫正): raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
             SurfaceDebug("layout_callback accepted before_rebuild");
-            RebuildAndApplyGeometry(videoSize);
+            RequestRebuildLayer(videoSize);
         }
 
-        private void RebuildAndApplyGeometry(VlcVideoSize videoSize, long mediaRequestId = 0L)
+        private void RequestRebuildLayer(VlcVideoSize videoSize, long mediaRequestId = 0L)
         {
             if (_geometryService == null && videoScreen != null)
                 _geometryService = CreateGeometryService(videoScreen);
-            if (_geometryService != null)
+            if (_geometryService == null)
             {
-                _currentGeometrySelection = ResolveRequestedGeometry();
-                if (_geometryBindingCoroutine != null)
-                {
-                    SurfaceDebug("rebuild_geometry queued_while_active");
-                    return;
-                }
+                SurfaceDebug($"rebuild_layer skipped geometryService=null videoScreenNull={videoScreen == null}");
+                return;
+            }
+
+            _currentGeometrySelection = ResolveRequestedGeometry();
+            if (_geometryBindingCoroutine != null)
+            {
+                _hasPendingRebuildLayer = true;
+                _pendingRebuildVideoSize = videoSize;
+                if (mediaRequestId > 0L || _pendingRebuildMediaRequestId == 0L)
+                    _pendingRebuildMediaRequestId = mediaRequestId;
                 SurfaceDebug(
-                    $"rebuild_geometry start content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
-                    $"projection={_currentGeometrySelection.Projection} stereo={_currentGeometrySelection.Stereo} " +
-                    $"mediaRequest={mediaRequestId} state={FormatSurfaceState()}");
-                _geometryBindingCoroutine = StartCoroutine(
-                    RebuildGeometryAndSubtitleSurface(videoSize, mediaRequestId));
+                    $"rebuild_layer coalesced_while_active mediaRequest={mediaRequestId} " +
+                    $"pendingRequest={_pendingRebuildMediaRequestId}");
+                return;
             }
-            else
+
+            SurfaceDebug(
+                $"rebuild_layer start content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
+                $"projection={_currentGeometrySelection.Projection} stereo={_currentGeometrySelection.Stereo} " +
+                $"mediaRequest={mediaRequestId} state={FormatSurfaceState()}");
+            _geometryBindingCoroutine = StartCoroutine(RebuildLayer(videoSize, mediaRequestId));
+        }
+
+        private void RequestChangeLayer()
+        {
+            if (videoScreen == null || !CurrentVideoSize.IsValid)
+                return;
+            if (_geometryService == null)
+                _geometryService = CreateGeometryService(videoScreen);
+            if (_geometryBindingCoroutine != null)
             {
-                SurfaceDebug($"rebuild_geometry skipped geometryService=null videoScreenNull={videoScreen == null}");
+                _pendingChangeLayer = true;
+                SurfaceDebug("change_layer coalesced_while_active");
+                return;
             }
+
+            if (!_boundInputLayerSpec.HasValue || !_videoSurfaceBoundToVlc)
+            {
+                RequestRebuildLayer(CurrentVideoSize);
+                return;
+            }
+
+            _currentGeometrySelection = ResolveRequestedGeometry();
+            _geometryBindingCoroutine = StartCoroutine(ChangeLayer(CurrentVideoSize));
         }
 
         private VideoScreenGeometryService CreateGeometryService(VideoScreen screen)
@@ -442,32 +477,28 @@ namespace XRVLC.Media
                 () => CurrentVideoAspectRatio);
         }
 
-        private IEnumerator RebuildGeometryAndSubtitleSurface(VlcVideoSize videoSize, long mediaRequestId)
+        private IEnumerator RebuildLayer(VlcVideoSize videoSize, long mediaRequestId)
         {
             CancelNativeSubtitleSurfaceCoroutine();
             _currentGeometrySelection = ResolveRequestedGeometry();
-            VideoSurfaceSpec videoSpec = CreateVideoSurfaceSpec(videoSize, _currentGeometrySelection);
-            VideoOutputRebindKind rebindKind = GetVideoOutputRebindKind(videoSpec, mediaRequestId);
-            if (mediaRequestId > 0L && rebindKind == VideoOutputRebindKind.GeometryOnly)
-                rebindKind = VideoOutputRebindKind.ReuseLayer;
+            VideoLayerSpec layerSpec = CreateVideoLayerSpec(videoSize, _currentGeometrySelection);
+            bool rebuildInput = VideoLayerPlanner.NeedsInputRebuild(
+                _boundInputLayerSpec,
+                _videoSurfaceBoundToVlc,
+                layerSpec.Input);
+            bool rebuildOutput = VideoLayerPlanner.NeedsOutputRebuild(
+                _boundOutputLayerSpec,
+                videoScreen != null && videoScreen.IsHardwareSurfaceReady(),
+                layerSpec.Output);
+            bool wasPlaying = VlcPlaybackBridge.IsPlaying()
+                || (mediaRequestId == 0L && _resumeAfterInputLayerRecovery);
             SurfaceDebug(
-                $"surface_rebuild begin kind={rebindKind} mediaRequest={mediaRequestId} " +
-                $"videoSpec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} " +
+                $"rebuild_layer begin mediaRequest={mediaRequestId} rebuildInput={rebuildInput} rebuildOutput={rebuildOutput} " +
+                $"input={layerSpec.Input.ContentWidth}x{layerSpec.Input.ContentHeight}/hw={layerSpec.Input.HardwareDecoding} " +
+                $"projection={layerSpec.Projection} stereo={layerSpec.Mapper.Stereo} chroma={layerSpec.Mapper.ChromaKeyEnabled} " +
                 $"state={FormatSurfaceState()}");
 
-            if (rebindKind == VideoOutputRebindKind.GeometryOnly)
-            {
-                ApplyManualGeometryWithoutRebuild(
-                    videoSpec.Projection,
-                    videoSpec.Stereo,
-                    videoSpec.CurveMode);
-                _boundVideoSurfaceSpec = videoSpec;
-                _geometryBindingCoroutine = null;
-                CompleteActivePlaybackRequest(mediaRequestId, "geometry-only");
-                yield break;
-            }
-
-            if (VlcPlaybackBridge.IsPlaying())
+            if (wasPlaying && (rebuildInput || rebuildOutput))
             {
                 Pause();
                 yield return WaitForPausedBeforeSurfaceRebuild();
@@ -476,71 +507,161 @@ namespace XRVLC.Media
             long token = ++_nextVideoOutputSwitchToken;
             _activeVideoOutputSwitchToken = token;
             _videoOutputSwitchState = VideoOutputSwitchState.AwaitDetached;
-            SurfaceDebug($"video_output_switch begin token={token} mediaRequest={mediaRequestId} kind={rebindKind}");
-            VlcPlaybackBridge.BeginVideoOutputDetach(token);
+            _videoOutputSwitchFailureReason = null;
+            SurfaceDebug(
+                $"video_layer begin token={token} operation=RebuildLayer mediaRequest={mediaRequestId} " +
+                $"rebuildInput={rebuildInput} rebuildOutput={rebuildOutput}");
+            VlcPlaybackBridge.BeginRebuildLayer(token, mediaRequestId, rebuildInput, rebuildOutput);
             yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Detached, 1.5f);
             if (_activeVideoOutputSwitchToken != token || _videoOutputSwitchState != VideoOutputSwitchState.Detached)
             {
-                SurfaceDebug($"video_output_switch detach_failed token={token} state={_videoOutputSwitchState}");
-                _geometryBindingCoroutine = null;
-                CompleteActivePlaybackRequest(mediaRequestId, "detach-failed");
+                SurfaceDebug($"rebuild_layer detach_failed token={token} state={_videoOutputSwitchState}");
+                if (!rebuildInput && TryRecoverWithFullInputRebuild(videoSize, mediaRequestId, layerSpec, false, wasPlaying))
+                    yield break;
+                FinishLayerTransaction(mediaRequestId, "detach-failed");
                 yield break;
             }
 
-            // Do not destroy/reuse a PICO layer until Android has confirmed old Vout=0.
-            _videoSurfaceBoundToVlc = false;
-            _boundVideoSurfaceSpec = null;
-            DisableAndDetachSubtitleSurface(false);
-            if (rebindKind == VideoOutputRebindKind.RebuildLayer)
+            if (rebuildInput)
             {
-                _geometryService.Rebuild(videoSize, videoSpec.ChromaKeyEnabled);
-                SurfaceDebug($"surface_rebuild after_geometry_rebuild state={FormatSurfaceState()}");
+                _boundInputLayerSpec = null;
+                _videoSurfaceBoundToVlc = false;
+            }
+            if (rebuildOutput)
+            {
+                _boundOutputLayerSpec = null;
+                _geometryService.Rebuild(videoSize, layerSpec.Mapper.ChromaKeyEnabled);
+                SurfaceDebug($"rebuild_layer output_rebuilt state={FormatSurfaceState()}");
             }
             else
             {
-                ApplyManualGeometryWithoutRebuild(
-                    videoSpec.Projection,
-                    videoSpec.Stereo,
-                    videoSpec.CurveMode);
+                ApplyLayerGeometryWithoutRebuild(layerSpec.Projection, layerSpec.Mapper.Stereo, layerSpec.CurveMode);
             }
 
-            VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
-            bool shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out SubtitleSurfaceSpec subtitleSpec, out _);
+            bool shouldBindSubtitleSurface = false;
+            SubtitleSurfaceSpec subtitleSpec = default(SubtitleSurfaceSpec);
+            if (rebuildOutput)
+            {
+                VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+                shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out subtitleSpec, out _);
+            }
             SurfaceDebug(
                 $"surface_rebuild before_wait shouldBindSubtitle={shouldBindSubtitleSurface} " +
                 $"state={FormatSurfaceState()}");
 
             yield return WaitForVideoAndSubtitleSurfaces(
-                rebindKind == VideoOutputRebindKind.RebuildLayer,
+                rebuildOutput,
                 shouldBindSubtitleSurface);
-            SurfaceDebug($"surface_rebuild after_wait state={FormatSurfaceState()}");
+            SurfaceDebug($"rebuild_layer surfaces_ready state={FormatSurfaceState()}");
 
             if (shouldBindSubtitleSurface)
                 BindSubtitleSurface(subtitleSpec);
-            if (!BeginVideoOutputAttach(token, mediaRequestId, videoSpec))
+            if (!AttachRebuildLayer(token, mediaRequestId, layerSpec, wasPlaying))
             {
-                _geometryBindingCoroutine = null;
-                CompleteActivePlaybackRequest(mediaRequestId, "attach-not-started");
+                FinishLayerTransaction(mediaRequestId, "attach-not-started");
                 yield break;
             }
             yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Ready, 5f);
             if (_activeVideoOutputSwitchToken == token && _videoOutputSwitchState == VideoOutputSwitchState.Ready)
             {
-                _boundVideoSurfaceSpec = videoSpec;
+                CommitLayerSpec(layerSpec);
                 _videoSurfaceBoundToVlc = true;
                 _activeVideoOutputSwitchToken = 0L;
                 _videoOutputSwitchState = VideoOutputSwitchState.None;
-                _geometryBindingCoroutine = null;
-                CompleteActivePlaybackRequest(mediaRequestId, "ready");
+                _videoOutputSwitchFailureReason = null;
+                _resumeAfterInputLayerRecovery = false;
+                if (mediaRequestId == 0L && wasPlaying && !VlcPlaybackBridge.IsPlaying())
+                    Play();
+                FinishLayerTransaction(mediaRequestId, "ready");
                 yield break;
+            }
+
+            SurfaceDebug($"rebuild_layer attach_failed token={token} state={_videoOutputSwitchState}");
+            if (!rebuildInput && TryRecoverWithFullInputRebuild(videoSize, mediaRequestId, layerSpec, rebuildOutput, wasPlaying))
+                yield break;
+            FinishLayerTransaction(mediaRequestId, "attach-failed");
+        }
+
+        private IEnumerator ChangeLayer(VlcVideoSize videoSize)
+        {
+            CancelNativeSubtitleSurfaceCoroutine();
+            _currentGeometrySelection = ResolveRequestedGeometry();
+            VideoLayerSpec layerSpec = CreateVideoLayerSpec(videoSize, _currentGeometrySelection);
+            bool rebuildOutput = VideoLayerPlanner.NeedsOutputRebuild(
+                _boundOutputLayerSpec,
+                videoScreen != null && videoScreen.IsHardwareSurfaceReady(),
+                layerSpec.Output);
+            bool wasPlaying = VlcPlaybackBridge.IsPlaying();
+            SurfaceDebug(
+                $"change_layer begin rebuildOutput={rebuildOutput} projection={layerSpec.Projection} " +
+                $"stereo={layerSpec.Mapper.Stereo} chroma={layerSpec.Mapper.ChromaKeyEnabled} state={FormatSurfaceState()}");
+
+            if (rebuildOutput && wasPlaying)
+            {
+                Pause();
+                yield return WaitForPausedBeforeSurfaceRebuild();
+            }
+
+            long token = ++_nextVideoOutputSwitchToken;
+            _activeVideoOutputSwitchToken = token;
+            _videoOutputSwitchState = VideoOutputSwitchState.AwaitDetached;
+            _videoOutputSwitchFailureReason = null;
+            VlcPlaybackBridge.BeginChangeLayer(token, rebuildOutput);
+            yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Detached, 1.5f);
+            if (_activeVideoOutputSwitchToken != token || _videoOutputSwitchState != VideoOutputSwitchState.Detached)
+            {
+                SurfaceDebug($"change_layer detach_failed token={token} state={_videoOutputSwitchState}");
+                if (TryRecoverWithFullInputRebuild(videoSize, 0L, layerSpec, false, wasPlaying))
+                    yield break;
+                FinishLayerTransaction(0L, "change-detach-failed");
+                yield break;
+            }
+
+            if (rebuildOutput)
+            {
+                _boundOutputLayerSpec = null;
+                _geometryService.Rebuild(videoSize, layerSpec.Mapper.ChromaKeyEnabled);
             }
             else
             {
-                SurfaceDebug($"video_output_switch attach_failed token={token} state={_videoOutputSwitchState}");
-                CompleteActivePlaybackRequest(mediaRequestId, "attach-failed");
+                ApplyLayerGeometryWithoutRebuild(layerSpec.Projection, layerSpec.Mapper.Stereo, layerSpec.CurveMode);
             }
 
-            _geometryBindingCoroutine = null;
+            bool shouldBindSubtitleSurface = false;
+            SubtitleSurfaceSpec subtitleSpec = default(SubtitleSurfaceSpec);
+            if (rebuildOutput)
+            {
+                VlcPlaybackBridge.SetSubtitleSurfacePolicy(ShouldStackSubtitlesOutside());
+                shouldBindSubtitleSurface = BeginNativeSubtitleSurfaceRebuild(out subtitleSpec, out _);
+            }
+            yield return WaitForVideoAndSubtitleSurfaces(rebuildOutput, shouldBindSubtitleSurface);
+            if (shouldBindSubtitleSurface)
+                BindSubtitleSurface(subtitleSpec);
+
+            if (!AttachChangeLayer(token, layerSpec))
+            {
+                FinishLayerTransaction(0L, "change-attach-not-started");
+                yield break;
+            }
+            yield return WaitForVideoOutputSwitch(token, VideoOutputSwitchState.Ready, 5f);
+            if (_activeVideoOutputSwitchToken == token && _videoOutputSwitchState == VideoOutputSwitchState.Ready)
+            {
+                CommitLayerSpec(layerSpec);
+                _videoSurfaceBoundToVlc = true;
+                _activeVideoOutputSwitchToken = 0L;
+                _videoOutputSwitchState = VideoOutputSwitchState.None;
+                _videoOutputSwitchFailureReason = null;
+                _resumeAfterInputLayerRecovery = false;
+                if (rebuildOutput && wasPlaying)
+                    Play();
+                FinishLayerTransaction(0L, "change-ready");
+                yield break;
+            }
+
+            SurfaceDebug($"change_layer attach_failed token={token} state={_videoOutputSwitchState}");
+            if (TryRecoverWithFullInputRebuild(videoSize, 0L, layerSpec, rebuildOutput, wasPlaying))
+                yield break;
+            FinishLayerTransaction(0L, "change-attach-failed");
         }
 
         private IEnumerator WaitForPausedBeforeSurfaceRebuild()
@@ -600,37 +721,142 @@ namespace XRVLC.Media
                 $"subtitleRequired={shouldBindSubtitleSurface} state={FormatSurfaceState()}");
         }
 
-        private bool BeginVideoOutputAttach(long token, long mediaRequestId, VideoSurfaceSpec videoSpec)
+        private bool AttachRebuildLayer(long token, long mediaRequestId, VideoLayerSpec layerSpec, bool resumeCurrentMedia)
         {
             if (videoScreen == null)
                 return false;
 
             IntPtr videoSurfacePtr = videoScreen.GetHardwareSurfaceHandle();
             SurfaceDebug(
-                $"video_output_switch attach token={token} mediaRequest={mediaRequestId} surface={videoSurfacePtr} spec={videoSpec.ContentWidth}x{videoSpec.ContentHeight}/" +
-                $"{videoSpec.Projection}/{videoSpec.Stereo}/{videoSpec.CurveMode} state={FormatSurfaceState()}");
+                $"video_layer attach operation=RebuildLayer token={token} mediaRequest={mediaRequestId} surface={videoSurfacePtr} " +
+                $"spec={layerSpec.Input.ContentWidth}x{layerSpec.Input.ContentHeight}/{layerSpec.Projection}/{layerSpec.Mapper.Stereo}/{layerSpec.CurveMode} " +
+                $"resumeCurrent={resumeCurrentMedia} state={FormatSurfaceState()}");
             if (videoSurfacePtr == IntPtr.Zero)
             {
                 Debug.LogError("[PlaybackService] Skipping Vout attach because video surface is not ready.");
-                SurfaceDebug("video_output_switch attach_skipped zero_surface");
+                SurfaceDebug("video_layer attach_skipped zero_surface");
                 VlcPlaybackBridge.CancelVideoOutputSwitch(token);
                 return false;
             }
 
-            bool fisheyeMappingEnabled = videoSpec.Projection == VideoProjection.Fisheye180;
-            // Processing parameters are cached by Android before the single attach.
             ApplyVideoSurfaceProcessingParameters();
             _videoOutputSwitchState = VideoOutputSwitchState.AwaitReady;
-            VlcPlaybackBridge.AttachVideoOutput(
+            VlcPlaybackBridge.AttachRebuildLayer(
                 token,
                 mediaRequestId,
                 videoSurfacePtr,
-                fisheyeMappingEnabled,
-                videoSpec.ChromaKeyEnabled,
-                videoSpec.Stereo,
-                videoSpec.ContentWidth,
-                videoSpec.ContentHeight);
+                layerSpec.Mapper.FisheyeMappingEnabled,
+                layerSpec.Mapper.ChromaKeyEnabled,
+                mediaRequestId == 0L && resumeCurrentMedia,
+                layerSpec.Mapper.Stereo,
+                layerSpec.Input.ContentWidth,
+                layerSpec.Input.ContentHeight);
             return true;
+        }
+
+        private bool AttachChangeLayer(long token, VideoLayerSpec layerSpec)
+        {
+            if (videoScreen == null)
+                return false;
+
+            IntPtr videoSurfacePtr = videoScreen.GetHardwareSurfaceHandle();
+            if (videoSurfacePtr == IntPtr.Zero)
+            {
+                VlcPlaybackBridge.CancelVideoOutputSwitch(token);
+                return false;
+            }
+
+            ApplyVideoSurfaceProcessingParameters();
+            _videoOutputSwitchState = VideoOutputSwitchState.AwaitReady;
+            VlcPlaybackBridge.AttachChangeLayer(
+                token,
+                videoSurfacePtr,
+                layerSpec.Mapper.FisheyeMappingEnabled,
+                layerSpec.Mapper.ChromaKeyEnabled,
+                layerSpec.Mapper.Stereo,
+                layerSpec.Input.ContentWidth,
+                layerSpec.Input.ContentHeight);
+            return true;
+        }
+
+        private void CommitLayerSpec(VideoLayerSpec layerSpec)
+        {
+            _boundInputLayerSpec = layerSpec.Input;
+            _boundMapperSpec = layerSpec.Mapper;
+            _boundOutputLayerSpec = layerSpec.Output;
+        }
+
+        private bool TryRecoverWithFullInputRebuild(
+            VlcVideoSize videoSize,
+            long mediaRequestId,
+            VideoLayerSpec target,
+            bool outputWasPrepared,
+            bool resumeCurrentMedia)
+        {
+            if (_videoOutputSwitchState != VideoOutputSwitchState.Failed
+                || (_videoOutputSwitchFailureReason != "input-rebuild-required"
+                    && _videoOutputSwitchFailureReason != "surface-mapper-runtime-error"))
+                return false;
+
+            bool outputMatchesTarget = videoScreen != null
+                && videoScreen.IsHardwareSurfaceReady()
+                && (outputWasPrepared
+                    || (_boundOutputLayerSpec.HasValue
+                        && _boundOutputLayerSpec.Value.Equals(target.Output)));
+            SurfaceDebug(
+                $"video_layer recover_full_input mediaRequest={mediaRequestId} " +
+                $"reason={_videoOutputSwitchFailureReason} outputMatchesTarget={outputMatchesTarget} " +
+                $"resumeCurrent={resumeCurrentMedia}");
+
+            if (_activeVideoOutputSwitchToken != 0L)
+                VlcPlaybackBridge.CancelVideoOutputSwitch(_activeVideoOutputSwitchToken);
+            _activeVideoOutputSwitchToken = 0L;
+            _videoOutputSwitchState = VideoOutputSwitchState.None;
+            _videoOutputSwitchFailureReason = null;
+            _boundInputLayerSpec = null;
+            _boundMapperSpec = null;
+            _boundOutputLayerSpec = outputMatchesTarget ? target.Output : (OutputLayerSpec?)null;
+            _videoSurfaceBoundToVlc = false;
+            _geometryBindingCoroutine = null;
+            if (mediaRequestId == 0L && resumeCurrentMedia)
+                _resumeAfterInputLayerRecovery = true;
+            RequestRebuildLayer(videoSize, mediaRequestId);
+            return true;
+        }
+
+        private void FinishLayerTransaction(long mediaRequestId, string reason)
+        {
+            if (_activeVideoOutputSwitchToken != 0L)
+            {
+                VlcPlaybackBridge.CancelVideoOutputSwitch(_activeVideoOutputSwitchToken);
+                _activeVideoOutputSwitchToken = 0L;
+                _videoOutputSwitchState = VideoOutputSwitchState.None;
+                _videoOutputSwitchFailureReason = null;
+            }
+            _resumeAfterInputLayerRecovery = false;
+            _geometryBindingCoroutine = null;
+            if (mediaRequestId > 0L && reason != "ready")
+                VlcPlaybackBridge.CancelPendingMediaRequest(mediaRequestId);
+            CompleteActivePlaybackRequest(mediaRequestId, reason);
+            StartNextParsedPlaybackRequest();
+            if (_geometryBindingCoroutine != null || _activeMediaRequestId != 0L)
+                return;
+
+            if (_hasPendingRebuildLayer)
+            {
+                VlcVideoSize pendingSize = _pendingRebuildVideoSize;
+                long pendingMediaRequestId = _pendingRebuildMediaRequestId;
+                _hasPendingRebuildLayer = false;
+                _pendingRebuildMediaRequestId = 0L;
+                RequestRebuildLayer(pendingSize, pendingMediaRequestId);
+                return;
+            }
+
+            if (_pendingChangeLayer)
+            {
+                _pendingChangeLayer = false;
+                RequestChangeLayer();
+            }
         }
 
         private IEnumerator WaitForVideoOutputSwitch(
@@ -656,6 +882,7 @@ namespace XRVLC.Media
                     $"elapsedMs={(long)((Time.realtimeSinceStartup - waitStartedAt) * 1000f)}");
                 VlcPlaybackBridge.CancelVideoOutputSwitch(token);
                 _videoOutputSwitchState = VideoOutputSwitchState.Failed;
+                _videoOutputSwitchFailureReason = "unity-timeout";
             }
         }
 
@@ -685,6 +912,7 @@ namespace XRVLC.Media
                     break;
                 case "failed":
                     _videoOutputSwitchState = VideoOutputSwitchState.Failed;
+                    _videoOutputSwitchFailureReason = parts.Length > 2 ? parts[2] : "unknown";
                     break;
                 default:
                     SurfaceDebug($"video_output_switch ignored unknown_event payload={payload}");
@@ -705,6 +933,7 @@ namespace XRVLC.Media
             VlcPlaybackBridge.CancelVideoOutputSwitch(_activeVideoOutputSwitchToken);
             _activeVideoOutputSwitchToken = 0L;
             _videoOutputSwitchState = VideoOutputSwitchState.None;
+            _videoOutputSwitchFailureReason = null;
         }
 
         private void BindSubtitleSurface(SubtitleSurfaceSpec subtitleSpec)
@@ -820,8 +1049,13 @@ namespace XRVLC.Media
         private void StopInternal()
         {
             CancelActiveVideoOutputSwitch("stop");
+            VlcPlaybackBridge.CancelPendingMediaRequests();
             _pendingPlaybackRequests.Clear();
             _activeMediaRequestId = 0L;
+            _pendingChangeLayer = false;
+            _hasPendingRebuildLayer = false;
+            _pendingRebuildMediaRequestId = 0L;
+            _resumeAfterInputLayerRecovery = false;
             _currentWidth = 0;
             _currentHeight = 0;
             _currentVisibleWidth = 0;
@@ -844,11 +1078,16 @@ namespace XRVLC.Media
         {
             Debug.Log("[PlaybackService] Clearing Unity playback surfaces before media switch.");
             CancelActiveVideoOutputSwitch("release-only");
+            VlcPlaybackBridge.CancelPendingMediaRequests();
             ClearPendingSurfaceBindingCoroutines();
             _currentWidth = 0;
             _currentHeight = 0;
             _currentVisibleWidth = 0;
             _currentVisibleHeight = 0;
+            _pendingChangeLayer = false;
+            _hasPendingRebuildLayer = false;
+            _pendingRebuildMediaRequestId = 0L;
+            _resumeAfterInputLayerRecovery = false;
 
             DisableAndDetachSubtitleSurface(false);
             DetachVideoSurfaceFromVlc();
@@ -882,7 +1121,7 @@ namespace XRVLC.Media
                 videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
                 _geometryService = CreateGeometryService(videoScreen);
                 videoScreen.RebuildLayer(UseHardwareDecoding);
-                _boundVideoSurfaceSpec = null;
+                ClearBoundLayerSpecs();
                 _videoSurfaceBoundToVlc = false;
             }
         }
@@ -895,7 +1134,7 @@ namespace XRVLC.Media
             videoScreen?.DestroyFlatSubtitleLayer();
             videoScreen = null;
             _geometryService = null;
-            _boundVideoSurfaceSpec = null;
+            ClearBoundLayerSpecs();
             _videoSurfaceBoundToVlc = false;
         }
 
@@ -1065,24 +1304,17 @@ namespace XRVLC.Media
 
             if (CurrentVideoSize.IsValid)
             {
-                VideoSurfaceSpec nextVideoSpec = CreateVideoSurfaceSpec(CurrentVideoSize, nextGeometry);
-                if (GetVideoOutputRebindKind(nextVideoSpec, 0L) != VideoOutputRebindKind.GeometryOnly)
-                {
-                    RebuildAndApplyGeometry(CurrentVideoSize);
-                    return;
-                }
-
-                ApplyManualGeometryWithoutRebuild(projection, stereo, curveMode);
+                RequestChangeLayer();
                 return;
             }
 
-            videoScreen.SetGeometry(projection, stereo, curveMode);
+            videoScreen.ChangeLayer(projection, stereo, curveMode);
             _currentGeometrySelection = nextGeometry;
         }
 
-        private void ApplyManualGeometryWithoutRebuild(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
+        private void ApplyLayerGeometryWithoutRebuild(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
         {
-            videoScreen.SetGeometry(projection, stereo, curveMode);
+            videoScreen.ChangeLayer(projection, stereo, curveMode);
             videoScreen.FitVideoSize((uint)CurrentVideoSize.ContentWidth, (uint)CurrentVideoSize.ContentHeight);
             _currentGeometrySelection = new VideoGeometrySelection(
                 projection,
@@ -1119,7 +1351,7 @@ namespace XRVLC.Media
                 $"despill={_chromaKeySettings.DespillStrength:F3}");
 
             if (CurrentVideoSize.IsValid && videoScreen != null)
-                RebuildAndApplyGeometry(CurrentVideoSize);
+                RequestChangeLayer();
         }
 
         public void SetChromaKeyColor(Color keyColor)
@@ -1222,7 +1454,8 @@ namespace XRVLC.Media
         {
             UseHardwareDecoding = !UseHardwareDecoding;
             Debug.Log($"[PlaybackService] 切换解码模式为: {(UseHardwareDecoding ? "硬解" : "软解")}");
-            // 需要实现软硬解切换协同 PlayerController，暂时留空
+            if (CurrentVideoSize.IsValid && videoScreen != null)
+                RequestRebuildLayer(CurrentVideoSize);
         }
 
         /// <summary>
@@ -1433,52 +1666,17 @@ namespace XRVLC.Media
             return true;
         }
 
-        private VideoOutputRebindKind GetVideoOutputRebindKind(VideoSurfaceSpec next, long mediaRequestId)
-        {
-            // A newly preloaded media is always a full output transaction, even when
-            // the dimensions happen to match the previous item.
-            if (mediaRequestId > 0L || !_videoSurfaceBoundToVlc || !_boundVideoSurfaceSpec.HasValue)
-                return VideoOutputRebindKind.RebuildLayer;
-
-            VideoSurfaceSpec previous = _boundVideoSurfaceSpec.Value;
-            if (previous.Equals(next))
-                return VideoOutputRebindKind.GeometryOnly;
-
-            bool sameLayerInputs = previous.ContentWidth == next.ContentWidth
-                && previous.ContentHeight == next.ContentHeight
-                && previous.Stereo == next.Stereo
-                && previous.HardwareDecoding == next.HardwareDecoding
-                && previous.ChromaKeyEnabled == next.ChromaKeyEnabled;
-            if (!sameLayerInputs)
-                return VideoOutputRebindKind.RebuildLayer;
-
-            if (IsSphere180To360Pair(previous.Projection, next.Projection))
-                return VideoOutputRebindKind.GeometryOnly;
-
-            if (IsSphere180FisheyePair(previous.Projection, next.Projection))
-                return VideoOutputRebindKind.ReuseLayer;
-
-            return VideoOutputRebindKind.RebuildLayer;
-        }
-
-        private static bool IsSphere180To360Pair(VideoProjection first, VideoProjection second)
-        {
-            return (first == VideoProjection.Sphere180 && second == VideoProjection.Sphere360)
-                || (first == VideoProjection.Sphere360 && second == VideoProjection.Sphere180);
-        }
-
-        private static bool IsSphere180FisheyePair(VideoProjection first, VideoProjection second)
-        {
-            return (first == VideoProjection.Sphere180 && second == VideoProjection.Fisheye180)
-                || (first == VideoProjection.Fisheye180 && second == VideoProjection.Sphere180);
-        }
-
-        private bool IsVideoSurfaceCurrent(VideoSurfaceSpec spec)
+        private bool IsVideoLayerCurrent(VideoLayerSpec spec)
         {
             return videoScreen != null
                 && videoScreen.IsHardwareSurfaceReady()
-                && _boundVideoSurfaceSpec.HasValue
-                && _boundVideoSurfaceSpec.Value.Equals(spec);
+                && _videoSurfaceBoundToVlc
+                && _boundInputLayerSpec.HasValue
+                && _boundMapperSpec.HasValue
+                && _boundOutputLayerSpec.HasValue
+                && _boundInputLayerSpec.Value.Equals(spec.Input)
+                && _boundMapperSpec.Value.Equals(spec.Mapper)
+                && _boundOutputLayerSpec.Value.Equals(spec.Output);
         }
 
         private bool IsSubtitleSurfaceCurrent(SubtitleSurfaceSpec spec)
@@ -1489,15 +1687,15 @@ namespace XRVLC.Media
                 && _boundSubtitleSurfaceSpec.Value.Equals(spec);
         }
 
-        private VideoSurfaceSpec CreateVideoSurfaceSpec(VlcVideoSize videoSize, VideoGeometrySelection geometry)
+        private VideoLayerSpec CreateVideoLayerSpec(VlcVideoSize videoSize, VideoGeometrySelection geometry)
         {
-            return new VideoSurfaceSpec(
+            return VideoLayerPlanner.Create(
                 (uint)videoSize.ContentWidth,
                 (uint)videoSize.ContentHeight,
+                UseHardwareDecoding,
                 geometry.Projection,
                 geometry.Stereo,
                 geometry.CurveMode,
-                UseHardwareDecoding,
                 _chromaKeySettings.Enabled);
         }
 
@@ -1561,7 +1759,14 @@ namespace XRVLC.Media
             VlcPlaybackBridge.DetachSurface();
             VlcPlaybackBridge.SetVideoSurfaceMapping(false, false, StereoMode.Mono, 0, 0);
             _videoSurfaceBoundToVlc = false;
-            _boundVideoSurfaceSpec = null;
+            ClearBoundLayerSpecs();
+        }
+
+        private void ClearBoundLayerSpecs()
+        {
+            _boundInputLayerSpec = null;
+            _boundMapperSpec = null;
+            _boundOutputLayerSpec = null;
         }
 
         public void SetRenderSubtitlesOutsideScreen(bool enabled)
@@ -1661,46 +1866,6 @@ namespace XRVLC.Media
         public void SetSubtitleDelay(long delayMs)
         {
             SetSubtitleDelaySeconds(delayMs / 1000f);
-        }
-
-        private readonly struct VideoSurfaceSpec : IEquatable<VideoSurfaceSpec>
-        {
-            public VideoSurfaceSpec(
-                uint contentWidth,
-                uint contentHeight,
-                VideoProjection projection,
-                StereoMode stereo,
-                FlatVideoCurveMode curveMode,
-                bool hardwareDecoding,
-                bool chromaKeyEnabled)
-            {
-                ContentWidth = contentWidth;
-                ContentHeight = contentHeight;
-                Projection = projection;
-                Stereo = stereo;
-                CurveMode = curveMode;
-                HardwareDecoding = hardwareDecoding;
-                ChromaKeyEnabled = chromaKeyEnabled;
-            }
-
-            public uint ContentWidth { get; }
-            public uint ContentHeight { get; }
-            public VideoProjection Projection { get; }
-            public StereoMode Stereo { get; }
-            public FlatVideoCurveMode CurveMode { get; }
-            public bool HardwareDecoding { get; }
-            public bool ChromaKeyEnabled { get; }
-
-            public bool Equals(VideoSurfaceSpec other)
-            {
-                return ContentWidth == other.ContentWidth
-                    && ContentHeight == other.ContentHeight
-                    && Projection == other.Projection
-                    && Stereo == other.Stereo
-                    && CurveMode == other.CurveMode
-                    && HardwareDecoding == other.HardwareDecoding
-                    && ChromaKeyEnabled == other.ChromaKeyEnabled;
-            }
         }
 
         private readonly struct SubtitleSurfaceSpec : IEquatable<SubtitleSurfaceSpec>
