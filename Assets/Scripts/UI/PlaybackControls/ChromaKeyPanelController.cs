@@ -22,10 +22,9 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private const float SwitchTrackLength = SwitchWidth * 0.75f;
     private const float SwitchTrackThickness = SwitchKnobSize * 0.5f;
     private const float SwitchKnobTravel = (SwitchWidth - SwitchKnobSize) * 0.5f;
-    private const float ChromaKeyParameterMax = 0.5f;
     private const float ColorExtractionSurfaceReadyTimeoutSeconds = 8f;
     private const float PanelWidth = 560f;
-    private const float ExpandedPanelHeight = 840f;
+    private const float ExpandedPanelHeight = 790f;
     private const float CollapsedPanelHeight = 82f;
     private PlaybackService _playbackService;
     private PicoPassthroughModeService _passthroughService;
@@ -42,13 +41,11 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     private Button _extractColorButton;
     private TextMeshProUGUI _extractColorLabel;
     private Slider _rangeSlider;
-    private Slider _falloffSlider;
-    private Toggle _edgeSmoothToggle;
-    private Toggle _clipBlackToggle;
-    private Toggle _clipWhiteToggle;
-    private Toggle _despillToggle;
+    private Slider _edgeSmoothSlider;
+    private Slider _despillSlider;
     private TextMeshProUGUI _rangeValue;
-    private TextMeshProUGUI _falloffValue;
+    private TextMeshProUGUI _edgeSmoothValue;
+    private TextMeshProUGUI _despillValue;
     private Texture2D _hueTexture;
     private bool _built;
     private bool _updatingUi;
@@ -84,7 +81,8 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
     {
         _progressSliderStyle = progressSlider;
         ApplyProgressSliderStyle(_rangeSlider);
-        ApplyProgressSliderStyle(_falloffSlider);
+        ApplyProgressSliderStyle(_edgeSmoothSlider);
+        ApplyProgressSliderStyle(_despillSlider);
     }
 
     public void Show()
@@ -152,15 +150,21 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         _rangeSlider.onValueChanged.AddListener(OnRangeChanged);
         _parameterControlRoots.Add(_rangeSlider.transform.parent.gameObject);
 
-        _falloffSlider = CreatePercentSlider(
+        _edgeSmoothSlider = CreatePercentSlider(
             transform,
-            "Falloff",
-            XrUiText.Get(XrUiTextKey.ChromaKeyFalloff),
-            out _falloffValue);
-        _falloffSlider.onValueChanged.AddListener(OnFalloffChanged);
-        _parameterControlRoots.Add(_falloffSlider.transform.parent.gameObject);
+            "EdgeSmooth",
+            XrUiText.Get(XrUiTextKey.ChromaKeyEdgeSmooth),
+            out _edgeSmoothValue);
+        _edgeSmoothSlider.onValueChanged.AddListener(OnEdgeSmoothChanged);
+        _parameterControlRoots.Add(_edgeSmoothSlider.transform.parent.gameObject);
 
-        _parameterControlRoots.Add(CreatePostProcessSwitchGrid(transform));
+        _despillSlider = CreatePercentSlider(
+            transform,
+            "DespillStrength",
+            XrUiText.Get(XrUiTextKey.ChromaKeyDespill),
+            out _despillValue);
+        _despillSlider.onValueChanged.AddListener(OnDespillChanged);
+        _parameterControlRoots.Add(_despillSlider.transform.parent.gameObject);
     }
 
     private GameObject CreateColorPalette(Transform parent)
@@ -302,64 +306,11 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         return buttonObject;
     }
 
-    private GameObject CreatePostProcessSwitchGrid(Transform parent)
-    {
-        GameObject grid = new GameObject(
-            "ChromaKeyPostProcessSwitches",
-            typeof(RectTransform),
-            typeof(VerticalLayoutGroup),
-            typeof(LayoutElement));
-        grid.transform.SetParent(parent, false);
-        VerticalLayoutGroup vertical = grid.GetComponent<VerticalLayoutGroup>();
-        vertical.spacing = 6f;
-        vertical.childControlWidth = true;
-        vertical.childControlHeight = true;
-        vertical.childForceExpandWidth = true;
-        vertical.childForceExpandHeight = false;
-        grid.GetComponent<LayoutElement>().preferredHeight = 114f;
-
-        GameObject firstRow = CreateRow(grid.transform, "ChromaKeyPostProcessRow1", 54f);
-        _edgeSmoothToggle = CreateCompactSwitch(
-            firstRow.transform,
-            "ChromaKeyEdgeSmoothToggle",
-            XrUiText.Get(XrUiTextKey.ChromaKeyEdgeSmooth));
-        _clipBlackToggle = CreateCompactSwitch(
-            firstRow.transform,
-            "ChromaKeyClipBlackToggle",
-            XrUiText.Get(XrUiTextKey.ChromaKeyClipBlack));
-
-        GameObject secondRow = CreateRow(grid.transform, "ChromaKeyPostProcessRow2", 54f);
-        _clipWhiteToggle = CreateCompactSwitch(
-            secondRow.transform,
-            "ChromaKeyClipWhiteToggle",
-            XrUiText.Get(XrUiTextKey.ChromaKeyClipWhite));
-        _despillToggle = CreateCompactSwitch(
-            secondRow.transform,
-            "ChromaKeyDespillToggle",
-            XrUiText.Get(XrUiTextKey.ChromaKeyDespill));
-
-        _edgeSmoothToggle.onValueChanged.AddListener(OnEdgeSmoothChanged);
-        _clipBlackToggle.onValueChanged.AddListener(OnClipBlackChanged);
-        _clipWhiteToggle.onValueChanged.AddListener(OnClipWhiteChanged);
-        _despillToggle.onValueChanged.AddListener(OnDespillChanged);
-        return grid;
-    }
-
     private Toggle CreateSwitchRow(Transform parent, string name, string label)
     {
         GameObject row = CreateRow(parent, name + "Row", 54f);
         CreateLabel(row.transform, label, 24f, 50f, 360f).GetComponent<LayoutElement>().flexibleWidth = 1f;
         return CreateSwitchToggle(row.transform, name + "Toggle");
-    }
-
-    private Toggle CreateCompactSwitch(Transform parent, string name, string label)
-    {
-        GameObject cell = CreateRow(parent, name + "Cell", 54f);
-        LayoutElement cellLayout = cell.GetComponent<LayoutElement>();
-        cellLayout.flexibleWidth = 1f;
-        cellLayout.preferredWidth = 0f;
-        CreateLabel(cell.transform, label, 18f, 50f).GetComponent<LayoutElement>().flexibleWidth = 1f;
-        return CreateSwitchToggle(cell.transform, name);
     }
 
     private Toggle CreateSwitchToggle(Transform parent, string name)
@@ -708,6 +659,7 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
             _playbackService.SetChromaKeyEnabled(true);
             if (_seeThroughButton != null)
                 _seeThroughButton.interactable = false;
+            BeginColorExtraction("enabled");
             return;
         }
 
@@ -747,21 +699,37 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         if (_rangeValue != null)
             _rangeValue.text = FormatPercent(value);
         if (!_updatingUi)
-            _playbackService?.SetChromaKeyColorRange(ToChromaKeyParameter(value));
+            _playbackService?.SetChromaKeyColorRange(
+                ToChromaKeyParameter(value, ChromaKeySettings.ColorRangeMax));
     }
 
-    private void OnFalloffChanged(float value)
+    private void OnEdgeSmoothChanged(float value)
     {
-        if (_falloffValue != null)
-            _falloffValue.text = FormatPercent(value);
+        if (_edgeSmoothValue != null)
+            _edgeSmoothValue.text = FormatPercent(value);
         if (!_updatingUi)
-            _playbackService?.SetChromaKeyFalloff(ToChromaKeyParameter(value));
+            _playbackService?.SetChromaKeyEdgeSmooth(
+                ToChromaKeyParameter(value, ChromaKeySettings.EdgeSmoothMax));
+    }
+
+    private void OnDespillChanged(float value)
+    {
+        if (_despillValue != null)
+            _despillValue.text = FormatPercent(value);
+        if (!_updatingUi)
+            _playbackService?.SetChromaKeyDespillStrength(
+                ToChromaKeyParameter(value, ChromaKeySettings.DespillStrengthMax));
     }
 
     private void OnExtractColorClicked()
     {
+        BeginColorExtraction("button");
+    }
+
+    private void BeginColorExtraction(string trigger)
+    {
         Debug.Log(
-            $"[ChromaKeyPanel] Extract color clicked pending={_colorExtractionPending} " +
+            $"[ChromaKeyPanel] Extract color requested trigger={trigger} pending={_colorExtractionPending} " +
             $"playbackService={_playbackService != null} " +
             $"chromaEnabled={_playbackService != null && _playbackService.CurrentChromaKeySettings.Enabled}");
 
@@ -831,34 +799,6 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         }
     }
 
-    private void OnEdgeSmoothChanged(bool enabled)
-    {
-        SetSwitchVisual(_edgeSmoothToggle, enabled);
-        if (!_updatingUi)
-            _playbackService?.SetChromaKeyEdgeSmoothEnabled(enabled);
-    }
-
-    private void OnClipBlackChanged(bool enabled)
-    {
-        SetSwitchVisual(_clipBlackToggle, enabled);
-        if (!_updatingUi)
-            _playbackService?.SetChromaKeyClipBlackEnabled(enabled);
-    }
-
-    private void OnClipWhiteChanged(bool enabled)
-    {
-        SetSwitchVisual(_clipWhiteToggle, enabled);
-        if (!_updatingUi)
-            _playbackService?.SetChromaKeyClipWhiteEnabled(enabled);
-    }
-
-    private void OnDespillChanged(bool enabled)
-    {
-        SetSwitchVisual(_despillToggle, enabled);
-        if (!_updatingUi)
-            _playbackService?.SetChromaKeyDespillEnabled(enabled);
-    }
-
     private void ApplyKeyColor(Color color, bool notifyPlayback)
     {
         color.a = 1f;
@@ -885,18 +825,24 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         _hexInput?.SetTextWithoutNotify(ToRgbText(settings.KeyColor));
         if (_colorPreview != null)
             _colorPreview.color = settings.KeyColor;
-        float rangeUiValue = ToUiPercentValue(settings.ColorRange);
-        float falloffUiValue = ToUiPercentValue(settings.Falloff);
+        float rangeUiValue = ToUiPercentValue(
+            settings.ColorRange,
+            ChromaKeySettings.ColorRangeMax);
+        float edgeSmoothUiValue = ToUiPercentValue(
+            settings.EdgeSmooth,
+            ChromaKeySettings.EdgeSmoothMax);
+        float despillUiValue = ToUiPercentValue(
+            settings.DespillStrength,
+            ChromaKeySettings.DespillStrengthMax);
         _rangeSlider?.SetValueWithoutNotify(rangeUiValue);
-        _falloffSlider?.SetValueWithoutNotify(falloffUiValue);
-        SetToggleWithoutNotify(_edgeSmoothToggle, settings.EdgeSmoothEnabled);
-        SetToggleWithoutNotify(_clipBlackToggle, settings.ClipBlackEnabled);
-        SetToggleWithoutNotify(_clipWhiteToggle, settings.ClipWhiteEnabled);
-        SetToggleWithoutNotify(_despillToggle, settings.DespillEnabled);
+        _edgeSmoothSlider?.SetValueWithoutNotify(edgeSmoothUiValue);
+        _despillSlider?.SetValueWithoutNotify(despillUiValue);
         if (_rangeValue != null)
             _rangeValue.text = FormatPercent(rangeUiValue);
-        if (_falloffValue != null)
-            _falloffValue.text = FormatPercent(falloffUiValue);
+        if (_edgeSmoothValue != null)
+            _edgeSmoothValue.text = FormatPercent(edgeSmoothUiValue);
+        if (_despillValue != null)
+            _despillValue.text = FormatPercent(despillUiValue);
         _updatingUi = false;
 
         SetParameterControlsVisible(settings.Enabled);
@@ -1007,14 +953,16 @@ public sealed class ChromaKeyPanelController : MonoBehaviour
         return $"{Mathf.RoundToInt(Mathf.Clamp01(value) * 100f)}%";
     }
 
-    private static float ToChromaKeyParameter(float uiValue)
+    private static float ToChromaKeyParameter(float uiValue, float parameterMax)
     {
-        return Mathf.Clamp01(uiValue) * ChromaKeyParameterMax;
+        return Mathf.Clamp01(uiValue) * parameterMax;
     }
 
-    private static float ToUiPercentValue(float parameterValue)
+    private static float ToUiPercentValue(float parameterValue, float parameterMax)
     {
-        return Mathf.Clamp01(parameterValue / ChromaKeyParameterMax);
+        return parameterMax > 0f
+            ? Mathf.Clamp01(parameterValue / parameterMax)
+            : 0f;
     }
 
     private void OnDestroy()

@@ -74,11 +74,8 @@ namespace XRVLC.Localization
         public const string ChromaKeyColor = "chromakey.key_color";
         public const string ChromaKeyHex = "chromakey.hex";
         public const string ChromaKeyColorRange = "chromakey.color_range";
-        public const string ChromaKeyFalloff = "chromakey.falloff";
         public const string ChromaKeyExtractColor = "chromakey.extract_color";
         public const string ChromaKeyEdgeSmooth = "chromakey.edge_smooth";
-        public const string ChromaKeyClipBlack = "chromakey.clip_black";
-        public const string ChromaKeyClipWhite = "chromakey.clip_white";
         public const string ChromaKeyDespill = "chromakey.despill";
     }
 
@@ -163,11 +160,8 @@ namespace XRVLC.Localization
             [XrUiTextKey.ChromaKeyColor] = "Key color",
             [XrUiTextKey.ChromaKeyHex] = "Hex",
             [XrUiTextKey.ChromaKeyColorRange] = "Color Range",
-            [XrUiTextKey.ChromaKeyFalloff] = "Falloff",
             [XrUiTextKey.ChromaKeyExtractColor] = "Extract Key Color",
             [XrUiTextKey.ChromaKeyEdgeSmooth] = "Edge Smooth",
-            [XrUiTextKey.ChromaKeyClipBlack] = "Clip Black",
-            [XrUiTextKey.ChromaKeyClipWhite] = "Clip White",
             [XrUiTextKey.ChromaKeyDespill] = "Despill"
         };
 
@@ -245,11 +239,8 @@ namespace XRVLC.Localization
             [XrUiTextKey.ChromaKeyColor] = "键色",
             [XrUiTextKey.ChromaKeyHex] = "Hex",
             [XrUiTextKey.ChromaKeyColorRange] = "颜色范围",
-            [XrUiTextKey.ChromaKeyFalloff] = "边缘过渡",
             [XrUiTextKey.ChromaKeyExtractColor] = "提取主色",
             [XrUiTextKey.ChromaKeyEdgeSmooth] = "边缘平滑",
-            [XrUiTextKey.ChromaKeyClipBlack] = "黑场裁剪",
-            [XrUiTextKey.ChromaKeyClipWhite] = "白场裁剪",
             [XrUiTextKey.ChromaKeyDespill] = "去溢色"
         };
 

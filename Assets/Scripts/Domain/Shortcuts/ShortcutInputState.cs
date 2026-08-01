@@ -31,6 +31,8 @@ namespace XRVLC
         private float _rightTriggerHeldSeconds;
         private bool _leftTriggerFastRateBegun;
         private bool _rightTriggerFastRateBegun;
+        private bool _leftTriggerSuppressedUntilRelease;
+        private bool _rightTriggerSuppressedUntilRelease;
 
         /// <summary>
         /// 更新单只手柄的轴值和按键状态，并在越过阈值或按键按下边沿时输出命令。
@@ -50,8 +52,9 @@ namespace XRVLC
 
             ShortcutCommand triggerCommand = UpdateTriggerHold(
                 hand,
-                suppressTriggerAndAxisShortcuts ? false : triggerPressed,
-                deltaTimeSeconds);
+                triggerPressed,
+                deltaTimeSeconds,
+                suppressTriggerAndAxisShortcuts);
             if (triggerCommand.Type != ShortcutCommandType.None)
                 return triggerCommand;
 
@@ -115,6 +118,8 @@ namespace XRVLC
             _rightTriggerHeldSeconds = 0f;
             _leftTriggerFastRateBegun = false;
             _rightTriggerFastRateBegun = false;
+            _leftTriggerSuppressedUntilRelease = false;
+            _rightTriggerSuppressedUntilRelease = false;
         }
 
         /// <summary>
@@ -217,7 +222,11 @@ namespace XRVLC
             return pressed && !wasPressed;
         }
 
-        private ShortcutCommand UpdateTriggerHold(XRNode hand, bool pressed, float deltaTimeSeconds)
+        private ShortcutCommand UpdateTriggerHold(
+            XRNode hand,
+            bool pressed,
+            float deltaTimeSeconds,
+            bool suppressFastRate)
         {
             bool wasPressed = GetPreviousButton(hand, ButtonKind.Trigger);
             SetPreviousButton(hand, ButtonKind.Trigger, pressed);
@@ -227,7 +236,21 @@ namespace XRVLC
                 bool hadBegun = GetTriggerFastRateBegun(hand);
                 SetTriggerHeldSeconds(hand, 0f);
                 SetTriggerFastRateBegun(hand, false);
+                SetTriggerSuppressedUntilRelease(hand, false);
                 return wasPressed && hadBegun
+                    ? new ShortcutCommand(ShortcutCommandType.EndShortcutFastRate)
+                    : ShortcutCommand.None;
+            }
+
+            if (suppressFastRate)
+                SetTriggerSuppressedUntilRelease(hand, true);
+
+            if (GetTriggerSuppressedUntilRelease(hand))
+            {
+                bool hadBegun = GetTriggerFastRateBegun(hand);
+                SetTriggerHeldSeconds(hand, 0f);
+                SetTriggerFastRateBegun(hand, false);
+                return hadBegun
                     ? new ShortcutCommand(ShortcutCommandType.EndShortcutFastRate)
                     : ShortcutCommand.None;
             }
@@ -263,6 +286,17 @@ namespace XRVLC
         {
             if (hand == XRNode.LeftHand) _leftTriggerFastRateBegun = begun;
             else _rightTriggerFastRateBegun = begun;
+        }
+
+        private bool GetTriggerSuppressedUntilRelease(XRNode hand) =>
+            hand == XRNode.LeftHand
+                ? _leftTriggerSuppressedUntilRelease
+                : _rightTriggerSuppressedUntilRelease;
+
+        private void SetTriggerSuppressedUntilRelease(XRNode hand, bool suppressed)
+        {
+            if (hand == XRNode.LeftHand) _leftTriggerSuppressedUntilRelease = suppressed;
+            else _rightTriggerSuppressedUntilRelease = suppressed;
         }
 
         /// <summary>

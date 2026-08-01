@@ -978,24 +978,47 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VRUIManager_PlaybackPanelShowUsesCurrentMediaOrPlaylistGate()
+        public void VRUIManager_PlaybackPanelShowUsesActiveVideoSelectionGate()
         {
             string source = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
-            string playbackService = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs"));
             string showPanelMethod = ExtractMethod(source, "ShowPanelAndScheduleHide", "private void");
             string toggleMethod = ExtractMethod(source, "TogglePanel", "public void");
             string gateMethod = ExtractMethod(source, "CanShowPlaybackPanel", "private bool");
 
-            StringAssert.Contains("public bool HasCurrentMediaOrPlaylistItems()", playbackService);
-            StringAssert.Contains("if (CurrentMedia != null)", playbackService);
-            StringAssert.Contains("VlcPlaybackBridge.GetPlaylist()", playbackService);
-            StringAssert.Contains("VlcPlaybackPayloadParser.ParsePlaylist", playbackService);
-            StringAssert.Contains("playbackService.HasCurrentMediaOrPlaylistItems()", gateMethod);
-            StringAssert.DoesNotContain("playbackService.CurrentMedia != null", gateMethod);
-            StringAssert.Contains("if (!CanShowPlaybackPanel())", showPanelMethod);
+            StringAssert.Contains("VlcPlaybackBridge.TryHasActivePlaybackSelection(out bool hasActiveVideoSelection)", gateMethod);
+            StringAssert.Contains("return hasActiveVideoSelection", gateMethod);
+            StringAssert.Contains("return playbackService.CurrentMedia != null", gateMethod);
+            StringAssert.DoesNotContain("HasCurrentMediaOrPlaylistItems", gateMethod);
+            StringAssert.Contains("if (!mediaReady && !CanShowPlaybackPanel())", showPanelMethod);
             StringAssert.Contains("SetPanelVisibility(false)", showPanelMethod);
-            StringAssert.Contains("if (!CanShowPlaybackPanel())", toggleMethod);
+            StringAssert.Contains("if (!isPanelVisible && !CanShowPlaybackPanel())", toggleMethod);
             StringAssert.Contains("SetPanelVisibility(!isPanelVisible)", toggleMethod);
+        }
+
+        [Test]
+        public void MediaParsePromotionShowsPanelBeforeSurfaceRebuildWithoutGeometryRetrigger()
+        {
+            string uiSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs"));
+            string playbackSource = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs"));
+            string promoteMethod = ExtractMethod(playbackSource, "StartNextParsedPlaybackRequest", "private void");
+            string updateMediaMethod = ExtractMethod(uiSource, "UpdateMediaInfo", "private void");
+            string geometryMethod = ExtractMethod(playbackSource, "SetManualVideoGeometry", "public void");
+
+            int backgroundIndex = promoteMethod.IndexOf("videoScreen.EnterPlaybackBackground()", System.StringComparison.Ordinal);
+            int mediaChangedIndex = promoteMethod.IndexOf("OnMediaChanged?.Invoke(CurrentMedia, 0)", System.StringComparison.Ordinal);
+            int rebuildIndex = promoteMethod.IndexOf("RebuildAndApplyGeometry(videoSize, request.MediaRequestId)", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(backgroundIndex, 0);
+            Assert.Greater(mediaChangedIndex, backgroundIndex);
+            Assert.Greater(rebuildIndex, mediaChangedIndex);
+
+            StringAssert.Contains("playbackService.OnMediaChanged += UpdateMediaInfo", uiSource);
+            StringAssert.Contains("ShowPanelAndScheduleHide(mediaReady: true)", updateMediaMethod);
+            StringAssert.Contains("SchedulePanelHide()", uiSource);
+            StringAssert.Contains("private const float PanelVisibleDuration = 3f", uiSource);
+            StringAssert.DoesNotContain("OnMediaChanged?.Invoke", geometryMethod);
+            StringAssert.DoesNotContain("ShowPanelAndScheduleHide", geometryMethod);
+            StringAssert.DoesNotContain("VideoPending", uiSource);
+            StringAssert.DoesNotContain("VideoReady", uiSource);
         }
 
         [Test]

@@ -5,42 +5,37 @@ namespace XRVLC
     public readonly struct ChromaKeySettings
     {
         private static readonly Color DefaultKeyColor = new Color32(0x2B, 0xE6, 0x40, 0xFF);
+        public const float ColorRangeMax = 0.25f;
+        public const float EdgeSmoothMax = 0.25f;
+        public const float DespillStrengthMax = 0.1f;
 
-        public ChromaKeySettings(bool enabled, Color keyColor, float colorRange, float falloff)
-            : this(enabled, keyColor, colorRange, falloff, false, false, false, false)
-        {
-        }
-
-        private ChromaKeySettings(
+        public ChromaKeySettings(
             bool enabled,
             Color keyColor,
             float colorRange,
-            float falloff,
-            bool edgeSmoothEnabled,
-            bool clipBlackEnabled,
-            bool clipWhiteEnabled,
-            bool despillEnabled)
+            float edgeSmooth,
+            float despillStrength = 0f)
         {
             Enabled = enabled;
             KeyColor = new Color(keyColor.r, keyColor.g, keyColor.b, 1f);
-            ColorRange = Mathf.Clamp01(colorRange);
-            Falloff = Mathf.Clamp01(falloff);
-            EdgeSmoothEnabled = edgeSmoothEnabled;
-            ClipBlackEnabled = clipBlackEnabled;
-            ClipWhiteEnabled = clipWhiteEnabled;
-            DespillEnabled = despillEnabled;
+            ColorRange = Mathf.Clamp(colorRange, 0f, ColorRangeMax);
+            EdgeSmooth = Mathf.Clamp(edgeSmooth, 0f, EdgeSmoothMax);
+            DespillStrength = Mathf.Clamp(despillStrength, 0f, DespillStrengthMax);
         }
 
-        public static ChromaKeySettings Default => new ChromaKeySettings(false, DefaultKeyColor, 0.2f, 0.1f);
+        public static ChromaKeySettings Default =>
+            new ChromaKeySettings(
+                false,
+                DefaultKeyColor,
+                ColorRangeMax * 0.5f,
+                EdgeSmoothMax * 0.5f,
+                DespillStrengthMax * 0.5f);
 
         public bool Enabled { get; }
         public Color KeyColor { get; }
         public float ColorRange { get; }
-        public float Falloff { get; }
-        public bool EdgeSmoothEnabled { get; }
-        public bool ClipBlackEnabled { get; }
-        public bool ClipWhiteEnabled { get; }
-        public bool DespillEnabled { get; }
+        public float EdgeSmooth { get; }
+        public float DespillStrength { get; }
 
         public ChromaKeySettings WithEnabled(bool enabled)
         {
@@ -57,50 +52,29 @@ namespace XRVLC
             return Copy(colorRange: colorRange);
         }
 
-        public ChromaKeySettings WithFalloff(float falloff)
+        public ChromaKeySettings WithEdgeSmooth(float edgeSmooth)
         {
-            return Copy(falloff: falloff);
+            return Copy(edgeSmooth: edgeSmooth);
         }
 
-        public ChromaKeySettings WithEdgeSmoothEnabled(bool enabled)
+        public ChromaKeySettings WithDespillStrength(float despillStrength)
         {
-            return Copy(edgeSmoothEnabled: enabled);
-        }
-
-        public ChromaKeySettings WithClipBlackEnabled(bool enabled)
-        {
-            return Copy(clipBlackEnabled: enabled);
-        }
-
-        public ChromaKeySettings WithClipWhiteEnabled(bool enabled)
-        {
-            return Copy(clipWhiteEnabled: enabled);
-        }
-
-        public ChromaKeySettings WithDespillEnabled(bool enabled)
-        {
-            return Copy(despillEnabled: enabled);
+            return Copy(despillStrength: despillStrength);
         }
 
         private ChromaKeySettings Copy(
             bool? enabled = null,
             Color? keyColor = null,
             float? colorRange = null,
-            float? falloff = null,
-            bool? edgeSmoothEnabled = null,
-            bool? clipBlackEnabled = null,
-            bool? clipWhiteEnabled = null,
-            bool? despillEnabled = null)
+            float? edgeSmooth = null,
+            float? despillStrength = null)
         {
             return new ChromaKeySettings(
                 enabled ?? Enabled,
                 keyColor ?? KeyColor,
                 colorRange ?? ColorRange,
-                falloff ?? Falloff,
-                edgeSmoothEnabled ?? EdgeSmoothEnabled,
-                clipBlackEnabled ?? ClipBlackEnabled,
-                clipWhiteEnabled ?? ClipWhiteEnabled,
-                despillEnabled ?? DespillEnabled);
+                edgeSmooth ?? EdgeSmooth,
+                despillStrength ?? DespillStrength);
         }
 
         public string ToHex()
@@ -128,9 +102,6 @@ namespace XRVLC
 
     public static class ChromaKeyMath
     {
-        private const float ClipBlackPoint = 0.08f;
-        private const float ClipWhitePoint = 0.92f;
-
         public static float CalculateYcgcoDistance(Color color, Color keyColor)
         {
             Vector2 chroma = ToYcgcoChroma(color);
@@ -138,10 +109,10 @@ namespace XRVLC
             return Mathf.Clamp01(Vector2.Distance(chroma, keyChroma));
         }
 
-        public static float CalculateAlpha(float distance, float colorRange, float falloff)
+        public static float CalculateAlpha(float distance, float colorRange, float edgeSmooth)
         {
-            float range = Mathf.Clamp01(colorRange);
-            float transition = Mathf.Clamp01(falloff);
+            float range = Mathf.Clamp(colorRange, 0f, ChromaKeySettings.ColorRangeMax);
+            float transition = Mathf.Clamp(edgeSmooth, 0f, ChromaKeySettings.EdgeSmoothMax);
             if (distance <= range)
                 return 0f;
             if (transition <= Mathf.Epsilon || distance >= range + transition)
@@ -149,13 +120,6 @@ namespace XRVLC
 
             float t = Mathf.Clamp01((distance - range) / transition);
             return t * t * (3f - 2f * t);
-        }
-
-        public static float ApplyClip(float alpha, bool clipBlackEnabled, bool clipWhiteEnabled)
-        {
-            float blackPoint = clipBlackEnabled ? ClipBlackPoint : 0f;
-            float whitePoint = clipWhiteEnabled ? ClipWhitePoint : 1f;
-            return Mathf.Clamp01((Mathf.Clamp01(alpha) - blackPoint) / (whitePoint - blackPoint));
         }
 
         private static Vector2 ToYcgcoChroma(Color color)

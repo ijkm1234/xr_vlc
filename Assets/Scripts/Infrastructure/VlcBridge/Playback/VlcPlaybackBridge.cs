@@ -303,24 +303,24 @@ public class VlcPlaybackBridge : MonoBehaviour
         FisheyeProjectionFormula fisheyeProjectionFormula,
         Color keyColor,
         float colorRange,
-        float falloff,
-        bool edgeSmoothEnabled,
-        bool clipBlackEnabled,
-        bool clipWhiteEnabled,
-        bool despillEnabled)
+        float edgeSmooth,
+        float despillStrength)
     {
         Color rgb = new Color(
             Mathf.Clamp01(keyColor.r),
             Mathf.Clamp01(keyColor.g),
             Mathf.Clamp01(keyColor.b),
             1f);
-        float range = Mathf.Clamp01(colorRange);
-        float safeFalloff = Mathf.Clamp01(falloff);
+        float range = Mathf.Clamp(colorRange, 0f, ChromaKeySettings.ColorRangeMax);
+        float safeEdgeSmooth = Mathf.Clamp(edgeSmooth, 0f, ChromaKeySettings.EdgeSmoothMax);
+        float safeDespillStrength = Mathf.Clamp(
+            despillStrength,
+            0f,
+            ChromaKeySettings.DespillStrengthMax);
         SurfaceDebug(
             $"set_video_surface_processing formula={fisheyeProjectionFormula} " +
-            $"key=({rgb.r:F4},{rgb.g:F4},{rgb.b:F4}) range={range:F4} falloff={safeFalloff:F4} " +
-            $"edgeSmooth={edgeSmoothEnabled} clipBlack={clipBlackEnabled} " +
-            $"clipWhite={clipWhiteEnabled} despill={despillEnabled}");
+            $"key=({rgb.r:F4},{rgb.g:F4},{rgb.b:F4}) range={range:F4} " +
+            $"edgeSmooth={safeEdgeSmooth:F4} despill={safeDespillStrength:F4}");
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -333,11 +333,8 @@ public class VlcPlaybackBridge : MonoBehaviour
                     rgb.g,
                     rgb.b,
                     range,
-                    safeFalloff,
-                    edgeSmoothEnabled,
-                    clipBlackEnabled,
-                    clipWhiteEnabled,
-                    despillEnabled);
+                    safeEdgeSmooth,
+                    safeDespillStrength);
             }
         }
         catch (Exception e)
@@ -552,9 +549,9 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
-    public static bool TryHasActivePlaybackSelection(out bool hasActiveSelection)
+    public static bool TryHasActivePlaybackSelection(out bool hasActiveVideoSelection)
     {
-        hasActiveSelection = false;
+        hasActiveVideoSelection = false;
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -564,7 +561,7 @@ public class VlcPlaybackBridge : MonoBehaviour
                 if (state < 0)
                     return false;
 
-                hasActiveSelection = state == 1;
+                hasActiveVideoSelection = state == 1;
                 return true;
             }
         }

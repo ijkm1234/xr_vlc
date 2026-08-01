@@ -46,7 +46,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     private bool m_AarVisible;
     private bool m_RestoreAarAfterSystemPanel;
     private bool m_AwaitingPlaybackStartAfterAarReturn;
-    private bool m_PlaybackActiveOrStarting;
     private void Awake()
     {
         if (Instance == null)
@@ -289,21 +288,13 @@ public class VlcLibraryLauncher : MonoBehaviour
                 m_RestoreAarAfterSystemPanel)
                 yield break;
 
-            if (m_PlaybackActiveOrStarting)
-            {
-                m_AwaitingPlaybackStartAfterAarReturn = false;
-                homePanel.SetVisible(false);
-                yield break;
-            }
-
             bool querySucceeded =
-                VlcPlaybackBridge.TryHasActivePlaybackSelection(out bool hasActiveSelection);
-            if (querySucceeded && hasActiveSelection)
+                VlcPlaybackBridge.TryHasActivePlaybackSelection(out bool hasActiveVideoSelection);
+            if (querySucceeded && hasActiveVideoSelection)
             {
                 m_AwaitingPlaybackStartAfterAarReturn = false;
-                m_PlaybackActiveOrStarting = true;
                 homePanel.SetVisible(false);
-                Debug.Log("[VlcLibraryLauncher] Unity focused with active playback; Home panel remains hidden.");
+                Debug.Log("[VlcLibraryLauncher] Unity focused with an active video selection; Home panel remains hidden.");
                 yield break;
             }
 
@@ -311,9 +302,8 @@ public class VlcLibraryLauncher : MonoBehaviour
             if (querySucceeded && (!m_AwaitingPlaybackStartAfterAarReturn || isLastAttempt))
             {
                 m_AwaitingPlaybackStartAfterAarReturn = false;
-                m_PlaybackActiveOrStarting = false;
                 homePanel.SetVisible(true);
-                Debug.Log("[VlcLibraryLauncher] Unity focused without active playback; Home panel shown.");
+                Debug.Log("[VlcLibraryLauncher] Unity focused without an active video selection; Home panel shown.");
                 yield break;
             }
 
@@ -422,7 +412,6 @@ public class VlcLibraryLauncher : MonoBehaviour
     private void OnPlayRequested(XRVLC.Media.MediaWrapper media)
     {
         m_AwaitingPlaybackStartAfterAarReturn = false;
-        m_PlaybackActiveOrStarting = true;
         m_AarVisible = false;
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
@@ -435,7 +424,8 @@ public class VlcLibraryLauncher : MonoBehaviour
             string.Equals(state, "Ended", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(state, "Error", StringComparison.OrdinalIgnoreCase))
         {
-            m_PlaybackActiveOrStarting = false;
+            if (m_LastObservedXrFocused == true)
+                BeginFocusedUiWork();
             return;
         }
 
@@ -446,9 +436,10 @@ public class VlcLibraryLauncher : MonoBehaviour
             return;
 
         m_AwaitingPlaybackStartAfterAarReturn = false;
-        m_PlaybackActiveOrStarting = true;
-        CancelFocusedUiWork();
-        EnsureHomePanelController()?.SetVisible(false);
+        if (m_LastObservedXrFocused == true)
+            BeginFocusedUiWork();
+        else
+            EnsureHomePanelController()?.SetVisible(false);
     }
 
     private VlcFocusRestoreHandler EnsureFocusRestoreHandler()

@@ -5,7 +5,12 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
-public sealed class ProgressHoverTimeBubble : MonoBehaviour, IPointerEnterHandler, IPointerMoveHandler, IPointerExitHandler
+public sealed class ProgressHoverTimeBubble : MonoBehaviour,
+    IPointerEnterHandler,
+    IPointerMoveHandler,
+    IPointerExitHandler,
+    IPointerDownHandler,
+    IPointerUpHandler
 {
     private const float BubbleWidth = 86f;
     private const float BubbleHeight = 34f;
@@ -20,6 +25,9 @@ public sealed class ProgressHoverTimeBubble : MonoBehaviour, IPointerEnterHandle
     private TextMeshProUGUI _bubbleText;
     private long _totalTimeMs;
 
+    public event Action<float> SeekReleased;
+    public bool IsInteracting { get; private set; }
+
     private void Awake()
     {
         Bind(GetComponent<Slider>());
@@ -27,6 +35,7 @@ public sealed class ProgressHoverTimeBubble : MonoBehaviour, IPointerEnterHandle
 
     private void OnDisable()
     {
+        IsInteracting = false;
         HideBubble();
     }
 
@@ -58,6 +67,22 @@ public sealed class ProgressHoverTimeBubble : MonoBehaviour, IPointerEnterHandle
     public void OnPointerExit(PointerEventData eventData)
     {
         HideBubble();
+    }
+
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        IsInteracting = true;
+        UpdateProgressHoverTimeBubble(eventData);
+    }
+
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        if (!IsInteracting)
+            return;
+
+        IsInteracting = false;
+        if (_slider != null)
+            SeekReleased?.Invoke(_slider.value);
     }
 
     private void UpdateProgressHoverTimeBubble(PointerEventData eventData)

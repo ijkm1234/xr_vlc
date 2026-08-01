@@ -27,9 +27,9 @@ public sealed class VlcHomePanelController : MonoBehaviour
             gameObject.SetActive(visible);
     }
 
-    public void ApplyPlaybackSelectionResult(bool querySucceeded, bool hasActiveSelection)
+    public void ApplyPlaybackSelectionResult(bool querySucceeded, bool hasActiveVideoSelection)
     {
-        SetVisible(querySucceeded && !hasActiveSelection);
+        SetVisible(querySucceeded && !hasActiveVideoSelection);
     }
 
     private void OnHomeClicked()

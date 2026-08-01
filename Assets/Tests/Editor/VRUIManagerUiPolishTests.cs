@@ -1,6 +1,8 @@
 using NUnit.Framework;
 using System.IO;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace XRVLC.Tests
 {
@@ -334,7 +336,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void GeometryMenuCascadesFlatCurveOptionsAndUsesLeftAlignedSectionLabels()
+        public void GeometryMenuSeparatesProjectionControlsFromStereoAndAdjustsHeight()
         {
             string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
 
@@ -346,8 +348,18 @@ namespace XRVLC.Tests
             StringAssert.Contains("bool showFlatCurveOptions = _geometryProjection == XRVLC.VideoProjection.Flat", vr);
             StringAssert.Contains("_curveSectionLabel.SetActive(showFlatCurveOptions)", vr);
             StringAssert.Contains("_curveRow.gameObject.SetActive(showFlatCurveOptions)", vr);
-            StringAssert.Contains("geometryMenuFlatHeight", vr);
+            StringAssert.Contains("CreateGeometryDivider(menu.transform)", vr);
+            StringAssert.Contains("\"ProjectionStereoDivider\"", vr);
+            StringAssert.Contains("new Color(1f, 1f, 1f, 0.16f)", vr);
+            StringAssert.Contains("GeometryMenuDetailedHeight", vr);
+            StringAssert.Contains("GeometryMenuSimpleHeight", vr);
             StringAssert.Contains("TextAlignmentOptions.Left", vr);
+
+            int curveIndex = vr.IndexOf("_curveRow = CreateGeometryRow(menu.transform, \"CurveRow\")", System.StringComparison.Ordinal);
+            int dividerIndex = vr.IndexOf("CreateGeometryDivider(menu.transform)", System.StringComparison.Ordinal);
+            int stereoIndex = vr.IndexOf("CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo))", System.StringComparison.Ordinal);
+            Assert.Greater(dividerIndex, curveIndex);
+            Assert.Greater(stereoIndex, dividerIndex);
         }
 
         [Test]
@@ -439,6 +451,49 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void MainScene_OrdersPassthroughBeforeBrightnessAndSettingsBeforeTracks()
+        {
+            const string scenePath = "Assets/Scenes/MainVRScene.unity";
+            Scene scene = SceneManager.GetSceneByPath(scenePath);
+            bool openedForTest = !scene.IsValid() || !scene.isLoaded;
+            if (openedForTest)
+                scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+
+            try
+            {
+                Transform topRight = FindSceneTransform(scene, "TopRightGroup");
+                Transform header = FindSceneTransform(scene, "HeaderStatusGroup");
+                Transform left = FindSceneTransform(scene, "LeftGroup");
+                Assert.NotNull(topRight);
+                Assert.NotNull(header);
+                Assert.NotNull(left);
+
+                CollectionAssert.AreEqual(
+                    new[] { "SeeThroughBtn", "BrightnessBtn", "VolumeBtn" },
+                    ChildNames(topRight));
+                CollectionAssert.AreEqual(
+                    new[] { "SystemTimeText", "BatteryIcon" },
+                    ChildNames(header));
+                CollectionAssert.AreEqual(
+                    new[] { "SettingsBtn", "EqualizerBtn", "SubtitleBtn" },
+                    ChildNames(left));
+
+                Assert.AreEqual(210f, topRight.GetComponent<RectTransform>().rect.width, 0.01f);
+                Assert.IsFalse(
+                    topRight.GetChild(0).GetComponent<UnityEngine.UI.LayoutElement>().ignoreLayout);
+                Assert.AreEqual(
+                    150f,
+                    header.GetComponent<UnityEngine.UI.LayoutElement>().preferredWidth,
+                    0.01f);
+            }
+            finally
+            {
+                if (openedForTest)
+                    EditorSceneManager.CloseScene(scene, true);
+            }
+        }
+
+        [Test]
         public void RuntimeMenusUseLargerTextAndCloseOnOutsideTriggers()
         {
             string vr = File.ReadAllText(ProjectFile("Assets/Scripts/UI/PlaybackControls/VRUIManager.cs"));
@@ -496,6 +551,29 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("titleScroller:", scene);
             StringAssert.DoesNotContain("titleText:", scene);
+        }
+
+        private static Transform FindSceneTransform(Scene scene, string objectName)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
+                foreach (Transform candidate in transforms)
+                {
+                    if (candidate.name == objectName)
+                        return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static string[] ChildNames(Transform parent)
+        {
+            var names = new string[parent.childCount];
+            for (int i = 0; i < parent.childCount; i++)
+                names[i] = parent.GetChild(i).name;
+            return names;
         }
     }
 }

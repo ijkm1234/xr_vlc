@@ -327,6 +327,7 @@ namespace XRVLC.Media
             ResetShortcutPlaybackState(CurrentMedia);
             SetCurrentVideoSize(videoSize);
             OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings);
+            videoScreen.EnterPlaybackBackground();
             OnMediaChanged?.Invoke(CurrentMedia, 0);
             SurfaceDebug(
                 $"parse_finished start_head request={request.MediaRequestId} uri={RedactForLog(CurrentMedia.Uri)} " +
@@ -1114,7 +1115,8 @@ namespace XRVLC.Media
             OnChromaKeySettingsChanged?.Invoke(_chromaKeySettings);
             SurfaceDebug(
                 $"chroma_key_enabled enabled={enabled} key={_chromaKeySettings.ToHex()} " +
-                $"range={_chromaKeySettings.ColorRange:F3} falloff={_chromaKeySettings.Falloff:F3}");
+                $"range={_chromaKeySettings.ColorRange:F3} edgeSmooth={_chromaKeySettings.EdgeSmooth:F3} " +
+                $"despill={_chromaKeySettings.DespillStrength:F3}");
 
             if (CurrentVideoSize.IsValid && videoScreen != null)
                 RebuildAndApplyGeometry(CurrentVideoSize);
@@ -1132,33 +1134,15 @@ namespace XRVLC.Media
             NotifyChromaKeyProcessingParametersChanged("color-range");
         }
 
-        public void SetChromaKeyFalloff(float falloff)
+        public void SetChromaKeyEdgeSmooth(float edgeSmooth)
         {
-            _chromaKeySettings = _chromaKeySettings.WithFalloff(falloff);
-            NotifyChromaKeyProcessingParametersChanged("falloff");
-        }
-
-        public void SetChromaKeyEdgeSmoothEnabled(bool enabled)
-        {
-            _chromaKeySettings = _chromaKeySettings.WithEdgeSmoothEnabled(enabled);
+            _chromaKeySettings = _chromaKeySettings.WithEdgeSmooth(edgeSmooth);
             NotifyChromaKeyProcessingParametersChanged("edge-smooth");
         }
 
-        public void SetChromaKeyClipBlackEnabled(bool enabled)
+        public void SetChromaKeyDespillStrength(float despillStrength)
         {
-            _chromaKeySettings = _chromaKeySettings.WithClipBlackEnabled(enabled);
-            NotifyChromaKeyProcessingParametersChanged("clip-black");
-        }
-
-        public void SetChromaKeyClipWhiteEnabled(bool enabled)
-        {
-            _chromaKeySettings = _chromaKeySettings.WithClipWhiteEnabled(enabled);
-            NotifyChromaKeyProcessingParametersChanged("clip-white");
-        }
-
-        public void SetChromaKeyDespillEnabled(bool enabled)
-        {
-            _chromaKeySettings = _chromaKeySettings.WithDespillEnabled(enabled);
+            _chromaKeySettings = _chromaKeySettings.WithDespillStrength(despillStrength);
             NotifyChromaKeyProcessingParametersChanged("despill");
         }
 
@@ -1191,10 +1175,8 @@ namespace XRVLC.Media
             ApplyVideoSurfaceProcessingParameters();
             SurfaceDebug(
                 $"chroma_key_parameters reason={reason} key={_chromaKeySettings.ToHex()} " +
-                $"range={_chromaKeySettings.ColorRange:F3} falloff={_chromaKeySettings.Falloff:F3} " +
-                $"edgeSmooth={_chromaKeySettings.EdgeSmoothEnabled} " +
-                $"clipBlack={_chromaKeySettings.ClipBlackEnabled} " +
-                $"clipWhite={_chromaKeySettings.ClipWhiteEnabled} despill={_chromaKeySettings.DespillEnabled} " +
+                $"range={_chromaKeySettings.ColorRange:F3} edgeSmooth={_chromaKeySettings.EdgeSmooth:F3} " +
+                $"despill={_chromaKeySettings.DespillStrength:F3} " +
                 "surfaceRebuild=false");
         }
 
@@ -1204,11 +1186,8 @@ namespace XRVLC.Media
                 _fisheyeProjectionFormula,
                 _chromaKeySettings.KeyColor,
                 _chromaKeySettings.ColorRange,
-                _chromaKeySettings.Falloff,
-                _chromaKeySettings.EdgeSmoothEnabled,
-                _chromaKeySettings.ClipBlackEnabled,
-                _chromaKeySettings.ClipWhiteEnabled,
-                _chromaKeySettings.DespillEnabled);
+                _chromaKeySettings.EdgeSmooth,
+                _chromaKeySettings.DespillStrength);
         }
 
         public void Next(bool forceUserAction = true)

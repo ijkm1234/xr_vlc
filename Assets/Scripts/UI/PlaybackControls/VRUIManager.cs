@@ -58,8 +58,8 @@ public class VRUIManager : MonoBehaviour
     private const float SystemStatusFontSize = 26f;
     private const float GeometryMenuFontSize = 22f;
     private const float GeometryMenuWidth = 760f;
-    private const float geometryMenuFlatHeight = 280f;
-    private const float geometryMenuPanoramicHeight = 194f;
+    private const float GeometryMenuDetailedHeight = 284f;
+    private const float GeometryMenuSimpleHeight = 194f;
     private const float MinWorldCanvasDynamicPixelsPerUnit = 24f;
     private const float UiTextSharpness = 0.35f;
     private const int AndroidStreamMusic = 3;
@@ -160,14 +160,13 @@ public class VRUIManager : MonoBehaviour
         private XRVLC.Media.PlaybackService playbackService;
         private PicoPassthroughModeService passthroughModeService;
         private bool isPanelVisible = true;
-        private bool _isUpdatingSlider = false;
-
     private float _hideTimer = 0f;
     private const float PanelVisibleDuration = 3f;
     private bool _autoHidePending = false;
     private bool _triggerWasPressed = false;
     private float _triggerHeldSeconds = 0f;
     private bool _triggerLongPressReleasePending = false;
+    private bool _triggerLongPressEligible = false;
 
     private float[] speedOptions = { 1.0f, 1.25f, 1.5f, 2.0f, 0.5f };
     private int currentSpeedIndex = 0;
@@ -248,7 +247,6 @@ public class VRUIManager : MonoBehaviour
 
         if (progressSlider != null)
         {
-            progressSlider.onValueChanged.AddListener(OnSliderValueChanged);
             EnsureProgressHoverTimeBubble();
         }
 
@@ -345,6 +343,7 @@ public class VRUIManager : MonoBehaviour
     {
         var rightHand = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
         bool pressed = rightHand.TryGetFeatureValue(UnityEngine.XR.CommonUsages.triggerButton, out bool val) && val;
+        bool uiHasFocus = uiInputGate != null && uiInputGate.IsHoveringBlockingUi;
 
         if (pressed)
         {
@@ -352,11 +351,19 @@ public class VRUIManager : MonoBehaviour
             {
                 _triggerHeldSeconds = 0f;
                 _triggerLongPressReleasePending = false;
+                _triggerLongPressEligible = !uiHasFocus;
+            }
+            else if (uiHasFocus)
+            {
+                _triggerLongPressEligible = false;
             }
 
-            _triggerHeldSeconds += Time.deltaTime;
-            if (_triggerHeldSeconds >= XRVLC.ShortcutInputState.TriggerFastRateHoldSeconds)
-                _triggerLongPressReleasePending = true;
+            if (_triggerLongPressEligible)
+            {
+                _triggerHeldSeconds += Time.deltaTime;
+                if (_triggerHeldSeconds >= XRVLC.ShortcutInputState.TriggerFastRateHoldSeconds)
+                    _triggerLongPressReleasePending = true;
+            }
         }
         else if (_triggerWasPressed)
         {
@@ -365,6 +372,7 @@ public class VRUIManager : MonoBehaviour
 
             _triggerHeldSeconds = 0f;
             _triggerLongPressReleasePending = false;
+            _triggerLongPressEligible = false;
         }
 
         _triggerWasPressed = pressed;
@@ -701,9 +709,9 @@ public class VRUIManager : MonoBehaviour
         return dropdown != null && dropdown.Contains(target);
     }
 
-    private void ShowPanelAndScheduleHide()
+    private void ShowPanelAndScheduleHide(bool mediaReady = false)
     {
-        if (!CanShowPlaybackPanel())
+        if (!mediaReady && !CanShowPlaybackPanel())
         {
             SetPanelVisibility(false);
             return;
@@ -718,7 +726,13 @@ public class VRUIManager : MonoBehaviour
         if (playbackService == null)
             playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
 
-        return playbackService != null && playbackService.HasCurrentMediaOrPlaylistItems();
+        if (playbackService == null)
+            return false;
+
+        if (VlcPlaybackBridge.TryHasActivePlaybackSelection(out bool hasActiveVideoSelection))
+            return hasActiveVideoSelection;
+
+        return playbackService.CurrentMedia != null;
     }
 
     private void SchedulePanelHide()
@@ -874,6 +888,8 @@ public class VRUIManager : MonoBehaviour
             volumeBtn.onClick.RemoveListener(OnVolumeBtnClicked);
         if (systemSlider != null)
             systemSlider.onValueChanged.RemoveListener(OnSystemSliderValueChanged);
+        if (progressHoverTimeBubble != null)
+            progressHoverTimeBubble.SeekReleased -= OnProgressSeekReleased;
         if (passthroughModeService != null)
             passthroughModeService.StateChanged -= OnPassthroughStateChanged;
     }
@@ -1708,7 +1724,7 @@ public class VRUIManager : MonoBehaviour
         layoutElement.ignoreLayout = true;
 
         var rect = menu.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(GeometryMenuWidth, geometryMenuFlatHeight);
+        rect.sizeDelta = new Vector2(GeometryMenuWidth, GeometryMenuDetailedHeight);
         rect.anchorMin = Vector2.zero;
         rect.anchorMax = Vector2.zero;
         rect.pivot = Vector2.zero;
@@ -1741,17 +1757,19 @@ public class VRUIManager : MonoBehaviour
         _fisheyeStereographicButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeStereographic), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.Stereographic));
         _fisheyeOrthographicButton = CreateGeometryOptionButton(_fisheyeFormulaRow, XrUiText.Get(XrUiTextKey.GeometryFisheyeOrthographic), () => SetFisheyeProjectionFormula(XRVLC.FisheyeProjectionFormula.Orthographic));
 
-        CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo));
-        Transform stereoRow = CreateGeometryRow(menu.transform, "StereoRow");
-        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoMono), () => SetGeometryStereo(XRVLC.StereoMode.Mono));
-        _stereoTopBottomButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoTopBottom), () => SetGeometryStereo(XRVLC.StereoMode.TopBottom));
-        _stereoLeftRightButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoLeftRight), () => SetGeometryStereo(XRVLC.StereoMode.LeftRight));
-
         _curveSectionLabel = CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryCurve)).gameObject;
         _curveRow = CreateGeometryRow(menu.transform, "CurveRow");
         _curveNoneButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveNone), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.None));
         _curveSmallButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveSmall), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Small));
         _curveLargeButton = CreateGeometryOptionButton(_curveRow, XrUiText.Get(XrUiTextKey.GeometryCurveLarge), () => SetFlatCurveMode(XRVLC.FlatVideoCurveMode.Large));
+
+        CreateGeometryDivider(menu.transform);
+
+        CreateGeometrySectionLabel(menu.transform, XrUiText.Get(XrUiTextKey.GeometryStereo));
+        Transform stereoRow = CreateGeometryRow(menu.transform, "StereoRow");
+        _stereoMonoButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoMono), () => SetGeometryStereo(XRVLC.StereoMode.Mono));
+        _stereoTopBottomButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoTopBottom), () => SetGeometryStereo(XRVLC.StereoMode.TopBottom));
+        _stereoLeftRightButton = CreateGeometryOptionButton(stereoRow, XrUiText.Get(XrUiTextKey.GeometryStereoLeftRight), () => SetGeometryStereo(XRVLC.StereoMode.LeftRight));
 
         UpdateGeometrySelectionHighlights();
         geometryMenu.SetActive(false);
@@ -1795,6 +1813,26 @@ public class VRUIManager : MonoBehaviour
         var element = row.GetComponent<LayoutElement>();
         element.preferredHeight = 54f;
         return row.transform;
+    }
+
+    private void CreateGeometryDivider(Transform parent)
+    {
+        var divider = new GameObject(
+            "ProjectionStereoDivider",
+            typeof(RectTransform),
+            typeof(CanvasRenderer),
+            typeof(Image),
+            typeof(LayoutElement));
+        divider.transform.SetParent(parent, false);
+
+        Image image = divider.GetComponent<Image>();
+        image.color = new Color(1f, 1f, 1f, 0.16f);
+        image.raycastTarget = false;
+
+        LayoutElement element = divider.GetComponent<LayoutElement>();
+        element.minHeight = 1f;
+        element.preferredHeight = 1f;
+        element.flexibleHeight = 0f;
     }
 
     private Button CreateGeometryOptionButton(Transform parent, string label, System.Action onClick)
@@ -1896,8 +1934,8 @@ public class VRUIManager : MonoBehaviour
         if (rect != null)
         {
             float height = showFlatCurveOptions || showFisheyeFormulaOptions
-                ? geometryMenuFlatHeight
-                : geometryMenuPanoramicHeight;
+                ? GeometryMenuDetailedHeight
+                : GeometryMenuSimpleHeight;
             rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
             rect.sizeDelta = new Vector2(rect.sizeDelta.x, height);
         }
@@ -2640,6 +2678,7 @@ public class VRUIManager : MonoBehaviour
             titleScroller.SetText(GetDisplayTitle(media));
 
         SetLocalGeometrySelectionFromMedia(media);
+        ShowPanelAndScheduleHide(mediaReady: true);
     }
 
     private static string GetDisplayTitle(XRVLC.Media.MediaWrapper media)
@@ -2679,11 +2718,11 @@ public class VRUIManager : MonoBehaviour
         if (totalTimeText != null)
             totalTimeText.text = FormatTime(totalTimeMs);
 
-        if (progressSlider != null && totalTimeMs > 0)
+        if (progressSlider != null &&
+            totalTimeMs > 0 &&
+            (progressHoverTimeBubble == null || !progressHoverTimeBubble.IsInteracting))
         {
-            _isUpdatingSlider = true;
-            progressSlider.value = (float)timeMs / totalTimeMs;
-            _isUpdatingSlider = false;
+            progressSlider.SetValueWithoutNotify((float)timeMs / totalTimeMs);
         }
 
         if (progressHoverTimeBubble != null)
@@ -2699,9 +2738,8 @@ public class VRUIManager : MonoBehaviour
         return string.Format("{0:D2}:{1:D2}", t.Minutes, t.Seconds);
     }
 
-    public void OnSliderValueChanged(float val)
+    private void OnProgressSeekReleased(float val)
     {
-        if (_isUpdatingSlider) return;
         playbackService?.SeekToPosition(val);
     }
 
@@ -2715,6 +2753,8 @@ public class VRUIManager : MonoBehaviour
             progressHoverTimeBubble = progressSlider.gameObject.AddComponent<ProgressHoverTimeBubble>();
 
         progressHoverTimeBubble.Bind(progressSlider);
+        progressHoverTimeBubble.SeekReleased -= OnProgressSeekReleased;
+        progressHoverTimeBubble.SeekReleased += OnProgressSeekReleased;
     }
 
     public void OnSpeedBtnClicked()

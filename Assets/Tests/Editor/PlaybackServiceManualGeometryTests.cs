@@ -76,20 +76,29 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VideoScreen_FlatAndCylinderUseAlphaHoleWithDynamicBlackAndSelectedGrayBackgrounds()
+        public void VideoScreen_PlaybackBackgroundClearsSkyboxOnceAndUsesTransparentOrGray()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreen.cs");
             string source = File.ReadAllText(path);
             string setupFlatMode = ExtractMethod(source, "SetupFlatMode", "private void");
-            string updateBackground = ExtractMethod(source, "UpdateFlatUnderlayBackgroundColor", "private void");
+            string enterPlaybackBackground = ExtractMethod(source, "EnterPlaybackBackground", "public void");
+            string updateBackground = ExtractMethod(source, "UpdateFlatUnderlayBackground", "private void");
             string transparentBackground = ExtractMethod(source, "ApplyTransparentUnderlayBackground", "private void");
+            string destroyLayer = ExtractMethod(source, "DestroyLayer", "public void");
 
             StringAssert.Contains("ApplyFlatUnderlayAlphaHoleBackground()", setupFlatMode);
             StringAssert.DoesNotContain("ApplyTransparentUnderlayBackground()", setupFlatMode);
-            StringAssert.Contains("IsVideoScreenInCameraView(targetCamera)", updateBackground);
-            StringAssert.Contains("new Color(0f, 0f, 0f, 1f)", updateBackground);
+            StringAssert.Contains("if (RenderSettings.skybox == null)", enterPlaybackBackground);
+            StringAssert.Contains("return;", enterPlaybackBackground);
+            StringAssert.Contains("RenderSettings.skybox = null", enterPlaybackBackground);
+            StringAssert.Contains("UpdateFlatUnderlayBackground()", enterPlaybackBackground);
+            StringAssert.Contains("IsHardwareSurfaceReady() && IsVideoScreenInCameraView(targetCamera)", updateBackground);
+            StringAssert.Contains("new Color(0f, 0f, 0f, 0f)", updateBackground);
             StringAssert.Contains("new Color(0.24f, 0.24f, 0.24f, 1f)", updateBackground);
             StringAssert.Contains("new Color(0f, 0f, 0f, 0f)", transparentBackground);
+            StringAssert.Contains("RenderSettings.skybox == null", destroyLayer);
+            StringAssert.Contains("new Color(0.24f, 0.24f, 0.24f, 1f)", destroyLayer);
+            StringAssert.DoesNotContain("_hasEnteredPlaybackBackground", source);
         }
 
         [Test]
@@ -99,7 +108,7 @@ namespace XRVLC.Tests
             string uiManagerPath = Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs");
             string videoScreenSource = File.ReadAllText(videoScreenPath);
             string uiManagerSource = File.ReadAllText(uiManagerPath);
-            string updateBackground = ExtractMethod(videoScreenSource, "UpdateFlatUnderlayBackgroundColor", "private void");
+            string updateBackground = ExtractMethod(videoScreenSource, "UpdateFlatUnderlayBackground", "private void");
             string passthroughStateChanged = ExtractMethod(uiManagerSource, "OnPassthroughStateChanged", "private void");
 
             StringAssert.Contains("public void SetPassthroughBackgroundEnabled(bool enabled)", videoScreenSource);
@@ -574,14 +583,15 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void MainScene_UsesTransparentSolidColorBackgroundByDefault()
+        public void MainScene_UsesAuthoredStarfieldSkyboxByDefault()
         {
             string path = Path.Combine(Application.dataPath, "Scenes/MainVRScene.unity");
             string scene = File.ReadAllText(path);
 
-            StringAssert.Contains("m_SkyboxMaterial: {fileID: 0}", scene);
-            StringAssert.Contains("m_ClearFlags: 2", scene);
-            StringAssert.Contains("m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}", scene);
+            StringAssert.Contains(
+                "m_SkyboxMaterial: {fileID: 2100000, guid: f2ac0e40f1c84e04a9a52290495c2387, type: 2}",
+                scene);
+            StringAssert.Contains("m_ClearFlags: 1", scene);
         }
 
         [Test]

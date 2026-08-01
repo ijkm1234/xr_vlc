@@ -174,6 +174,33 @@ namespace XRVLC.Tests
         }
 
         [Test]
+        public void HomePanelRequiresCurrentPlaylistItemToBeVideo()
+        {
+            string launcherSource = ReadLauncherSource();
+            string bridgePath = Path.Combine(
+                Application.dataPath,
+                "..",
+                "..",
+                "vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
+            string bridgeSource = File.ReadAllText(bridgePath);
+
+            StringAssert.Contains("val currentIndex = playlistManager.currentIndex", bridgeSource);
+            StringAssert.Contains("val currentMedia = if (currentIndex >= 0)", bridgeSource);
+            StringAssert.Contains("playlistManager.getMedia(currentIndex)", bridgeSource);
+            StringAssert.Contains("service.mediaListSize > 0", bridgeSource);
+            StringAssert.Contains("currentIndex != -1", bridgeSource);
+            StringAssert.Contains("currentMedia?.type == MediaWrapper.TYPE_VIDEO", bridgeSource);
+
+            StringAssert.Contains(
+                "VlcPlaybackBridge.TryHasActivePlaybackSelection(out bool hasActiveVideoSelection)",
+                launcherSource);
+            StringAssert.Contains("homePanel.SetVisible(true)", launcherSource);
+            StringAssert.Contains("homePanel.SetVisible(false)", launcherSource);
+            StringAssert.Contains("Playback state remained unknown; Home panel stays hidden.", launcherSource);
+            StringAssert.DoesNotContain("m_PlaybackActiveOrStarting", launcherSource);
+        }
+
+        [Test]
         public void SubtitlePicker_FallsBackToInternalStorageWhenMediaHasNoBrowsableParent()
         {
             string pickerPath = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/browser/FilePickerFragment.kt");

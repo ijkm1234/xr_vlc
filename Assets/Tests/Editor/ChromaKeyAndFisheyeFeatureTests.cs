@@ -18,12 +18,17 @@ namespace XRVLC.Tests
             object settings = type.GetProperty("Default", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
             Assert.NotNull(settings);
             Assert.AreEqual(false, ReadProperty<bool>(settings, "Enabled"));
-            Assert.AreEqual(0.2f, ReadProperty<float>(settings, "ColorRange"), 0.0001f);
-            Assert.AreEqual(0.1f, ReadProperty<float>(settings, "Falloff"), 0.0001f);
-            Assert.AreEqual(false, ReadProperty<bool>(settings, "EdgeSmoothEnabled"));
-            Assert.AreEqual(false, ReadProperty<bool>(settings, "ClipBlackEnabled"));
-            Assert.AreEqual(false, ReadProperty<bool>(settings, "ClipWhiteEnabled"));
-            Assert.AreEqual(false, ReadProperty<bool>(settings, "DespillEnabled"));
+            Assert.AreEqual(0.125f, ReadProperty<float>(settings, "ColorRange"), 0.0001f);
+            Assert.AreEqual(0.125f, ReadProperty<float>(settings, "EdgeSmooth"), 0.0001f);
+            Assert.AreEqual(0.05f, ReadProperty<float>(settings, "DespillStrength"), 0.0001f);
+            Assert.AreEqual(0.25f, (float)type.GetField("ColorRangeMax").GetRawConstantValue(), 0.0001f);
+            Assert.AreEqual(0.25f, (float)type.GetField("EdgeSmoothMax").GetRawConstantValue(), 0.0001f);
+            Assert.AreEqual(0.1f, (float)type.GetField("DespillStrengthMax").GetRawConstantValue(), 0.0001f);
+            Assert.IsNull(type.GetProperty("Falloff"));
+            Assert.IsNull(type.GetProperty("EdgeSmoothEnabled"));
+            Assert.IsNull(type.GetProperty("ClipBlackEnabled"));
+            Assert.IsNull(type.GetProperty("ClipWhiteEnabled"));
+            Assert.IsNull(type.GetProperty("DespillEnabled"));
             Assert.AreEqual("#2BE640", type.GetMethod("ToHex")?.Invoke(settings, null));
 
             object[] args = { "#149E59", null };
@@ -32,17 +37,16 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void ChromaKeyMath_UsesYcgcoChromaDistanceAndThresholdFalloff()
+        public void ChromaKeyMath_UsesYcgcoChromaDistanceAndEdgeSmoothing()
         {
             Type type = typeof(VideoProjection).Assembly.GetType("XRVLC.ChromaKeyMath");
             Assert.NotNull(type, "ChromaKeyMath must live in XRVLC.Shared.");
 
             MethodInfo distance = type.GetMethod("CalculateYcgcoDistance", BindingFlags.Public | BindingFlags.Static);
             MethodInfo alpha = type.GetMethod("CalculateAlpha", BindingFlags.Public | BindingFlags.Static);
-            MethodInfo clip = type.GetMethod("ApplyClip", BindingFlags.Public | BindingFlags.Static);
             Assert.NotNull(distance);
             Assert.NotNull(alpha);
-            Assert.NotNull(clip);
+            Assert.IsNull(type.GetMethod("ApplyClip", BindingFlags.Public | BindingFlags.Static));
 
             Color darkerGreen = new Color(0.1f, 0.7f, 0.1f, 1f);
             Color lighterGreen = new Color(0.2f, 0.8f, 0.2f, 1f);
@@ -57,11 +61,6 @@ namespace XRVLC.Tests
             Assert.AreEqual(0f, (float)alpha.Invoke(null, new object[] { 0.2f, 0.2f, 0.1f }), 0.0001f);
             Assert.AreEqual(1f, (float)alpha.Invoke(null, new object[] { 0.3f, 0.2f, 0.1f }), 0.0001f);
             Assert.That((float)alpha.Invoke(null, new object[] { 0.25f, 0.2f, 0.1f }), Is.InRange(0.45f, 0.55f));
-
-            Assert.AreEqual(0f, (float)clip.Invoke(null, new object[] { 0.05f, true, false }), 0.0001f);
-            Assert.AreEqual(1f, (float)clip.Invoke(null, new object[] { 0.95f, false, true }), 0.0001f);
-            Assert.AreEqual(0.5f, (float)clip.Invoke(null, new object[] { 0.5f, true, true }), 0.0001f);
-            Assert.AreEqual(0.37f, (float)clip.Invoke(null, new object[] { 0.37f, false, false }), 0.0001f);
         }
 
         [TestCase(FisheyeProjectionFormula.Equidistant, 0.5f, 0.5f)]
@@ -81,6 +80,7 @@ namespace XRVLC.Tests
         {
             string playback = Read("Assets/Scripts/Services/Playback/PlaybackService.cs");
             string unityBridge = Read("Assets/Scripts/Infrastructure/VlcBridge/Playback/VlcPlaybackBridge.cs");
+            string panel = Read("Assets/Scripts/UI/PlaybackControls/ChromaKeyPanelController.cs");
             string androidBridge = Read("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/PlaybackServiceBridge.kt");
             string mapper = Read("vlc-android/application/vlc-android/src/org/videolan/vlc/bridge/XrSurfaceMapper.kt");
 
@@ -88,13 +88,22 @@ namespace XRVLC.Tests
             StringAssert.Contains("SetChromaKeyEnabled", playback);
             StringAssert.Contains("SetChromaKeyColor", playback);
             StringAssert.Contains("SetChromaKeyColorRange", playback);
-            StringAssert.Contains("SetChromaKeyFalloff", playback);
-            StringAssert.Contains("SetChromaKeyEdgeSmoothEnabled", playback);
-            StringAssert.Contains("SetChromaKeyClipBlackEnabled", playback);
-            StringAssert.Contains("SetChromaKeyClipWhiteEnabled", playback);
-            StringAssert.Contains("SetChromaKeyDespillEnabled", playback);
+            StringAssert.Contains("SetChromaKeyEdgeSmooth", playback);
+            StringAssert.Contains("SetChromaKeyDespillStrength", playback);
+            StringAssert.DoesNotContain("SetChromaKeyFalloff", playback);
+            StringAssert.DoesNotContain("SetChromaKeyEdgeSmoothEnabled", playback);
+            StringAssert.DoesNotContain("SetChromaKeyClipBlackEnabled", playback);
+            StringAssert.DoesNotContain("SetChromaKeyClipWhiteEnabled", playback);
+            StringAssert.DoesNotContain("SetChromaKeyDespillEnabled", playback);
             StringAssert.Contains("RequestChromaKeyColorExtraction", playback);
             StringAssert.DoesNotContain("ShouldEnableChromaKey", playback);
+            StringAssert.Contains("ChromaKeySettings.ColorRangeMax", panel);
+            StringAssert.Contains("ChromaKeySettings.EdgeSmoothMax", panel);
+            StringAssert.Contains("ChromaKeySettings.DespillStrengthMax", panel);
+            StringAssert.Contains("BeginColorExtraction(\"enabled\")", panel);
+            StringAssert.Contains("\"DespillStrength\"", panel);
+            StringAssert.DoesNotContain("\"ClipBlack\"", panel);
+            StringAssert.DoesNotContain("\"ClipWhite\"", panel);
             StringAssert.Contains("SetVideoSurfaceProcessingParameters", unityBridge);
             StringAssert.Contains("RequestVideoSurfaceChromaKeyColorExtraction", unityBridge);
             StringAssert.Contains("OnChromaKeyColorExtracted", unityBridge);
@@ -119,15 +128,18 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("vec3 rgbToHsv", mapper);
             StringAssert.Contains("vec3 uChromaKeyColor", mapper);
             StringAssert.Contains("float uChromaKeyRange", mapper);
-            StringAssert.Contains("float uChromaKeyFalloff", mapper);
-            StringAssert.Contains("uChromaKeyEdgeSmoothEnabled", mapper);
-            StringAssert.Contains("uChromaKeyClipBlackEnabled", mapper);
-            StringAssert.Contains("uChromaKeyClipWhiteEnabled", mapper);
-            StringAssert.Contains("uChromaKeyDespillEnabled", mapper);
-            StringAssert.Contains("EDGE_SMOOTH_BLEND", mapper);
-            StringAssert.Contains("CLIP_BLACK_POINT", mapper);
-            StringAssert.Contains("CLIP_WHITE_POINT", mapper);
-            StringAssert.Contains("DESPILL_STRENGTH", mapper);
+            StringAssert.Contains("float uChromaKeyEdgeSmooth", mapper);
+            StringAssert.Contains("float uChromaKeyDespillStrength", mapper);
+            StringAssert.Contains("uChromaKeyRange + uChromaKeyEdgeSmooth", mapper);
+            StringAssert.Contains("spill * uChromaKeyDespillStrength * edgeWeight", mapper);
+            StringAssert.DoesNotContain("uChromaKeyFalloff", mapper);
+            StringAssert.DoesNotContain("uChromaKeyEdgeSmoothEnabled", mapper);
+            StringAssert.DoesNotContain("uChromaKeyClipBlackEnabled", mapper);
+            StringAssert.DoesNotContain("uChromaKeyClipWhiteEnabled", mapper);
+            StringAssert.DoesNotContain("uChromaKeyDespillEnabled", mapper);
+            StringAssert.DoesNotContain("guideWeight", mapper);
+            StringAssert.DoesNotContain("CLIP_BLACK_POINT", mapper);
+            StringAssert.DoesNotContain("CLIP_WHITE_POINT", mapper);
             StringAssert.Contains("float pitch = (localUv.y - 0.5) * PI;", mapper);
             StringAssert.DoesNotContain("float pitch = (0.5 - localUv.y) * PI;", mapper);
             StringAssert.Contains("vec2 inputUv = vec2(sampledUv.x, 1.0 - sampledUv.y)", mapper);

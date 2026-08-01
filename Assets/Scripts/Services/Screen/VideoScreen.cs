@@ -315,6 +315,18 @@ namespace XRVLC
                 UpdateFlatUnderlayBackground();
         }
 
+        public void EnterPlaybackBackground()
+        {
+            if (RenderSettings.skybox == null)
+                return;
+
+            RenderSettings.skybox = null;
+            if (_currentProjection == VideoProjection.Flat || _currentProjection == VideoProjection.Cylinder)
+                UpdateFlatUnderlayBackground();
+            else
+                ApplyTransparentUnderlayBackground();
+        }
+
         private void SetupFlatMode()
         {
             ApplyFlatUnderlayAlphaHoleBackground();
@@ -553,9 +565,9 @@ namespace XRVLC
             }
 
             targetCamera.clearFlags = CameraClearFlags.SolidColor;
-            bool screenVisible = IsVideoScreenInCameraView(targetCamera);
+            bool screenVisible = IsHardwareSurfaceReady() && IsVideoScreenInCameraView(targetCamera);
             targetCamera.backgroundColor = screenVisible
-                ? new Color(0f, 0f, 0f, 1f)
+                ? new Color(0f, 0f, 0f, 0f)
                 : new Color(0.24f, 0.24f, 0.24f, 1f);
         }
 
@@ -814,6 +826,15 @@ namespace XRVLC
         {
             DestroyFlatSubtitleLayer();
             _renderSurface?.DestroyLayer();
+            if (RenderSettings.skybox == null && !_passthroughBackgroundEnabled)
+            {
+                Camera targetCamera = GetMainCamera();
+                if (targetCamera != null)
+                {
+                    targetCamera.clearFlags = CameraClearFlags.SolidColor;
+                    targetCamera.backgroundColor = new Color(0.24f, 0.24f, 0.24f, 1f);
+                }
+            }
         }
 
         public bool RebuildFlatSubtitleLayer(uint surfaceWidth, uint surfaceHeight, uint contentWidth, uint contentHeight, bool renderOutsideScreen = false)

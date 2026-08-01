@@ -2532,7 +2532,7 @@ RectTransform:
   m_Children:
   - {fileID: 1815693699}
   - {fileID: 989748677}
-  m_Father: {fileID: 1343431299}
+  m_Father: {fileID: 1590996665}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
@@ -3582,11 +3582,11 @@ RectTransform:
   m_Children:
   - {fileID: 1714434854}
   - {fileID: 1550390439}
-  m_Father: {fileID: 1286491149}
+  m_Father: {fileID: 1908599221}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0.5, y: 0.5}
-  m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -77, y: 0}
+  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 58, y: 58}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &842860239
@@ -3683,7 +3683,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 306cc8c2b49d7114eaa3623786fc2126, type: 3}
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
-  m_IgnoreLayout: 1
+  m_IgnoreLayout: 0
   m_MinWidth: 58
   m_MinHeight: 58
   m_PreferredWidth: 58
@@ -6145,7 +6145,6 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 842860238}
   - {fileID: 1354640562}
   - {fileID: 1557889754}
   m_Father: {fileID: 20146920}
@@ -6168,9 +6167,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.LayoutElement
   m_IgnoreLayout: 0
-  m_MinWidth: 206.27031
+  m_MinWidth: 150
   m_MinHeight: 58
-  m_PreferredWidth: 206.27031
+  m_PreferredWidth: 150
   m_PreferredHeight: 58
   m_FlexibleWidth: 0
   m_FlexibleHeight: 0
@@ -6224,7 +6223,6 @@ RectTransform:
   - {fileID: 897251144}
   - {fileID: 402345839}
   - {fileID: 2111000001}
-  - {fileID: 694531711}
   - {fileID: 1262672448}
   m_Father: {fileID: 1364831074}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -7631,6 +7629,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 694531711}
   - {fileID: 1826108913}
   - {fileID: 1544479707}
   m_Father: {fileID: 1364831074}
@@ -8897,7 +8896,7 @@ Camera:
   m_GameObject: {fileID: 1767192433}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 2
+  m_ClearFlags: 1
   m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
@@ -9504,6 +9503,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 842860238}
   - {fileID: 1433079190}
   - {fileID: 1376302371}
   m_Father: {fileID: 523355449}
@@ -9511,7 +9511,7 @@ RectTransform:
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: -25, y: 15}
-  m_SizeDelta: {x: 135, y: 60}
+  m_SizeDelta: {x: 210, y: 60}
   m_Pivot: {x: 1, y: 1}
 --- !u!114 &1908599222
 MonoBehaviour:
