@@ -6,21 +6,25 @@ public static class ColdStartSplashOverlay
 {
     private const string SplashResourcePath = "AppIcon/icon_pico_splash";
     private const int OverlayLayer = 5;
-    private const float CanvasDistance = 2.5f;
+    private const float CanvasDistance = 2.0f;
+    private const float CanvasScale = 0.002f;
     public const int MinimumVisibleMilliseconds = 500;
     private const float MinimumVisibleSeconds = MinimumVisibleMilliseconds / 1000f;
-    private static readonly Vector2 CanvasSize = new Vector2(2200f, 1400f);
-    private static readonly Vector2 IconSize = new Vector2(260f, 260f);
+    private static readonly Vector2 CanvasSize = new Vector2(3200f, 2200f);
+    private static readonly Vector2 IconSize = new Vector2(320f, 320f);
 
     private static GameObject s_Root;
     private static OverlayLifetime s_Lifetime;
     private static Coroutine s_HideCoroutine;
-    private static float s_ShownAtRealtime;
+    private static float s_XrVisibleAtRealtime;
+    private static bool s_XrVisibleTimerStarted;
     private static bool s_HideRequested;
     private static bool s_WorldCoordinatesAligned;
     private static bool s_WorldAlignmentTimedOut;
 
     public static bool IsVisible => s_Root != null;
+    public static bool HasReachedMinimumVisibleTime =>
+        s_XrVisibleTimerStarted && GetRemainingMinimumVisibleSeconds() <= 0f;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void ShowBeforeSceneLoad()
@@ -39,8 +43,21 @@ public static class ColdStartSplashOverlay
         s_HideRequested = false;
         s_WorldCoordinatesAligned = false;
         s_WorldAlignmentTimedOut = false;
+        s_XrVisibleAtRealtime = 0f;
+        s_XrVisibleTimerStarted = false;
         CancelPendingHide();
         Show();
+    }
+
+    public static void MarkXrVisible()
+    {
+        if (s_XrVisibleTimerStarted)
+            return;
+
+        s_XrVisibleAtRealtime = Time.realtimeSinceStartup;
+        s_XrVisibleTimerStarted = true;
+        Debug.Log("[ColdStartSplashOverlay] XR visible; minimum visible timer started.");
+        HideWhenReadyAfterMinimumVisibleTime();
     }
 
     public static void MarkVlcActivityReady()
@@ -89,17 +106,17 @@ public static class ColdStartSplashOverlay
         Object.DontDestroyOnLoad(root);
 
         s_Lifetime = root.AddComponent<OverlayLifetime>();
-        Camera splashCamera = CreateCamera(root.transform);
-        CreateCanvas(splashCamera.transform, splashCamera, icon);
+        Canvas canvas = CreateCanvas(root.transform, icon);
+        s_Lifetime.Initialize(canvas);
 
         s_Root = root;
-        s_ShownAtRealtime = Time.realtimeSinceStartup;
         Debug.Log("[ColdStartSplashOverlay] Shown for VLC launch.");
     }
 
     private static void HideWhenReadyAfterMinimumVisibleTime()
     {
-        if (!s_HideRequested || !IsWorldAlignmentGateReleased() || s_Root == null)
+        if (!s_HideRequested || !IsWorldAlignmentGateReleased() || s_Root == null ||
+            !s_XrVisibleTimerStarted)
             return;
 
         float remainingSeconds = GetRemainingMinimumVisibleSeconds();
@@ -115,10 +132,7 @@ public static class ColdStartSplashOverlay
 
     private static float GetRemainingMinimumVisibleSeconds()
     {
-        if (s_Root == null)
-            return 0f;
-
-        float visibleSeconds = Time.realtimeSinceStartup - s_ShownAtRealtime;
+        float visibleSeconds = Time.realtimeSinceStartup - s_XrVisibleAtRealtime;
         return MinimumVisibleSeconds - visibleSeconds;
     }
 
@@ -162,45 +176,39 @@ public static class ColdStartSplashOverlay
         s_HideCoroutine = null;
     }
 
-    private static Camera CreateCamera(Transform parent)
-    {
-        GameObject cameraObject = new GameObject("Camera", typeof(Camera));
-        cameraObject.layer = OverlayLayer;
-        cameraObject.transform.SetParent(parent, false);
-        cameraObject.transform.localPosition = Vector3.zero;
-        cameraObject.transform.localRotation = Quaternion.identity;
-
-        Camera camera = cameraObject.GetComponent<Camera>();
-        camera.clearFlags = CameraClearFlags.SolidColor;
-        camera.backgroundColor = Color.black;
-        camera.cullingMask = 1 << OverlayLayer;
-        camera.depth = short.MaxValue;
-        camera.nearClipPlane = 0.01f;
-        camera.farClipPlane = 10f;
-        camera.allowHDR = false;
-        camera.allowMSAA = false;
-        return camera;
-    }
-
-    private static void CreateCanvas(Transform parent, Camera camera, Sprite icon)
+    private static Canvas CreateCanvas(Transform parent, Sprite icon)
     {
         GameObject canvasObject = new GameObject("Canvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
         canvasObject.layer = OverlayLayer;
         canvasObject.transform.SetParent(parent, false);
-        canvasObject.transform.localPosition = Vector3.forward * CanvasDistance;
+        canvasObject.transform.localPosition = Vector3.zero;
         canvasObject.transform.localRotation = Quaternion.identity;
-        canvasObject.transform.localScale = Vector3.one * 0.002f;
+        canvasObject.transform.localScale = Vector3.one * CanvasScale;
 
         RectTransform canvasRect = canvasObject.GetComponent<RectTransform>();
         canvasRect.sizeDelta = CanvasSize;
 
         Canvas canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
-        canvas.worldCamera = camera;
+        canvas.overrideSorting = true;
         canvas.sortingOrder = short.MaxValue;
 
         CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
         scaler.dynamicPixelsPerUnit = 10f;
+
+        GameObject backgroundObject = new GameObject("Background", typeof(RectTransform), typeof(Image));
+        backgroundObject.layer = OverlayLayer;
+        backgroundObject.transform.SetParent(canvasObject.transform, false);
+
+        RectTransform backgroundRect = backgroundObject.GetComponent<RectTransform>();
+        backgroundRect.anchorMin = Vector2.zero;
+        backgroundRect.anchorMax = Vector2.one;
+        backgroundRect.offsetMin = Vector2.zero;
+        backgroundRect.offsetMax = Vector2.zero;
+
+        Image backgroundImage = backgroundObject.GetComponent<Image>();
+        backgroundImage.color = Color.black;
+        backgroundImage.raycastTarget = false;
 
         GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
         iconObject.layer = OverlayLayer;
@@ -216,9 +224,80 @@ public static class ColdStartSplashOverlay
         iconImage.sprite = icon;
         iconImage.preserveAspect = true;
         iconImage.raycastTarget = false;
+
+        return canvas;
     }
 
     private sealed class OverlayLifetime : MonoBehaviour
     {
+        private Canvas m_Canvas;
+        private Camera m_XrCamera;
+        private bool m_HasLoggedCameraBinding;
+
+        public void Initialize(Canvas canvas)
+        {
+            m_Canvas = canvas;
+            AlignToXrCamera();
+        }
+
+        private void OnEnable()
+        {
+            Application.onBeforeRender += AlignToXrCamera;
+        }
+
+        private void OnDisable()
+        {
+            Application.onBeforeRender -= AlignToXrCamera;
+        }
+
+        private void LateUpdate()
+        {
+            AlignToXrCamera();
+        }
+
+        private void AlignToXrCamera()
+        {
+            if (!IsUsableXrCamera(m_XrCamera))
+                m_XrCamera = FindXrCamera();
+
+            if (m_XrCamera == null)
+                return;
+
+            Transform cameraTransform = m_XrCamera.transform;
+            transform.SetPositionAndRotation(
+                cameraTransform.position + cameraTransform.forward * CanvasDistance,
+                cameraTransform.rotation);
+
+            if (m_Canvas != null && m_Canvas.worldCamera != m_XrCamera)
+                m_Canvas.worldCamera = m_XrCamera;
+
+            if (m_HasLoggedCameraBinding)
+                return;
+
+            m_HasLoggedCameraBinding = true;
+            Debug.Log($"[ColdStartSplashOverlay] Bound to XR camera '{m_XrCamera.name}'.");
+        }
+
+        private static Camera FindXrCamera()
+        {
+            Camera mainCamera = Camera.main;
+            if (IsUsableXrCamera(mainCamera))
+                return mainCamera;
+
+            foreach (Camera camera in Camera.allCameras)
+            {
+                if (IsUsableXrCamera(camera))
+                    return camera;
+            }
+
+            return null;
+        }
+
+        private static bool IsUsableXrCamera(Camera camera)
+        {
+            return camera != null &&
+                   camera.isActiveAndEnabled &&
+                   camera.stereoTargetEye != StereoTargetEyeMask.None;
+        }
     }
 }

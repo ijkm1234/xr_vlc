@@ -2,11 +2,15 @@ Shader "XRVLC/ProceduralStarfieldSkybox"
 {
     Properties
     {
-        _StarGridSize ("Star Grid Size", Range(16, 96)) = 48
-        _StarDensity ("Star Density", Range(0, 0.2)) = 0.00875
+        _StarGridSize ("Star Distribution Rows", Range(4, 24)) = 6
+        _MinStarRadius ("Minimum Star Radius (Pixels)", Range(0.35, 1.5)) = 0.55
+        _MaxStarRadius ("Maximum Star Radius (Pixels)", Range(0.5, 2.5)) = 1.35
+        _RadiusTwinkleAmount ("Radius Twinkle Amount", Range(0, 0.5)) = 0.25
+        _BrightnessTwinkleAmount ("Brightness Twinkle Amount", Range(0, 0.8)) = 0.35
         _MinBrightness ("Minimum Brightness", Range(0, 1)) = 0.35
         _MaxBrightness ("Maximum Brightness", Range(0, 1)) = 0.95
-        _TwinkleSpeed ("Twinkle Speed", Range(0, 4)) = 0.9
+        _BlueStarColor ("Blue Star Color", Color) = (0.35, 0.62, 1.0, 1.0)
+        _TwinkleSpeed ("Twinkle Speed", Range(0, 4)) = 1.8
         _Seed ("Seed", Float) = 17
     }
 
@@ -51,50 +55,33 @@ Shader "XRVLC/ProceduralStarfieldSkybox"
 
             CBUFFER_START(UnityPerMaterial)
                 float _StarGridSize;
-                float _StarDensity;
+                float _MinStarRadius;
+                float _MaxStarRadius;
+                float _RadiusTwinkleAmount;
+                float _BrightnessTwinkleAmount;
                 float _MinBrightness;
                 float _MaxBrightness;
+                float4 _BlueStarColor;
                 float _TwinkleSpeed;
                 float _Seed;
             CBUFFER_END
 
-            float Hash21(float2 value)
+            #define MAX_STARS_PER_REGION 3
+
+            float3 Hash33(float3 value)
             {
-                value = frac(value * float2(123.34, 456.21));
-                value += dot(value, value + 45.32);
-                return frac(value.x * value.y);
+                value = frac(value * float3(0.1031, 0.1030, 0.0973));
+                value += dot(value, value.yxz + 33.33);
+                return frac((value.xxy + value.yxx) * value.zyx);
             }
 
-            float RandomForCell(float2 cell, float faceId, float salt)
+            float3 RandomForCell(float3 cell, float salt)
             {
-                float2 offset = float2(
-                    faceId * 37.17 + _Seed * 11.73,
-                    faceId * 91.41 + _Seed * 23.57);
-                return Hash21(cell + offset + float2(salt * 19.19, salt * 73.31));
-            }
-
-            float2 GetFaceUv(float3 direction, out float faceId)
-            {
-                float3 absoluteDirection = abs(direction);
-                float2 faceUv;
-
-                if (absoluteDirection.x >= absoluteDirection.y && absoluteDirection.x >= absoluteDirection.z)
-                {
-                    faceUv = direction.zy / absoluteDirection.x;
-                    faceId = direction.x >= 0.0 ? 0.0 : 1.0;
-                }
-                else if (absoluteDirection.y >= absoluteDirection.z)
-                {
-                    faceUv = direction.xz / absoluteDirection.y;
-                    faceId = direction.y >= 0.0 ? 2.0 : 3.0;
-                }
-                else
-                {
-                    faceUv = direction.xy / absoluteDirection.z;
-                    faceId = direction.z >= 0.0 ? 4.0 : 5.0;
-                }
-
-                return faceUv * 0.5 + 0.5;
+                float3 offset = float3(
+                    _Seed * 11.73 + salt * 19.19,
+                    _Seed * 23.57 + salt * 73.31,
+                    _Seed * 37.17 + salt * 41.53);
+                return Hash33(cell + offset);
             }
 
             Varyings Vert(Attributes input)
@@ -113,49 +100,138 @@ Shader "XRVLC/ProceduralStarfieldSkybox"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
                 float3 direction = normalize(input.directionOS);
-                float faceId;
-                float2 faceUv = GetFaceUv(direction, faceId);
-                float2 gridPosition = faceUv * _StarGridSize;
-                float2 cell = floor(gridPosition);
-                float2 positionInCell = frac(gridPosition);
+                float distributionRows = max(4.0, floor(_StarGridSize + 0.5));
+                float distributionColumns = floor(
+                    distributionRows * PI + 0.5);
+                float2 distributionSize = float2(
+                    distributionColumns,
+                    distributionRows);
 
-                float starExists = step(1.0 - _StarDensity, RandomForCell(cell, faceId, 1.0));
-                float2 starPosition = float2(
-                    RandomForCell(cell, faceId, 2.0),
-                    RandomForCell(cell, faceId, 3.0));
-                starPosition = lerp(0.18, 0.82, starPosition);
+                // Uniform steps in azimuth and direction.y divide a sphere into
+                // equal-area regions. Each region owns at least one jittered star,
+                // removing the large voids from probability-based thinning.
+                float azimuth01 = frac(
+                    atan2(direction.z, direction.x) / TWO_PI + 0.5);
+                float elevation01 = min(
+                    saturate(direction.y * 0.5 + 0.5),
+                    0.999999);
+                float distributionRow = floor(
+                    elevation01 * distributionRows);
 
-                float2 gridDx = ddx(gridPosition);
-                float2 gridDy = ddy(gridPosition);
-                float determinant = gridDx.x * gridDy.y - gridDx.y * gridDy.x;
-                float safeDeterminant = abs(determinant) > 0.000001
-                    ? determinant
-                    : (determinant >= 0.0 ? 0.000001 : -0.000001);
-                float2 starDelta = positionInCell - starPosition;
-                float2 starPixelOffset = float2(
-                    (starDelta.x * gridDy.y - starDelta.y * gridDy.x) / safeDeterminant,
-                    (gridDx.x * starDelta.y - gridDx.y * starDelta.x) / safeDeterminant);
-                // Reconstruct the subpixel point with a separable tent filter. Its
-                // total energy remains approximately one pixel while neighboring
-                // pixels share that energy during a pixel-boundary crossing. This
-                // avoids both the hard positional jump and the fade-to-black pulse.
-                float2 subpixelCoverage = saturate(1.0 - abs(starPixelOffset));
-                float starMask = subpixelCoverage.x * subpixelCoverage.y;
+                // Rotate every equal-area row independently so adjacent rows do
+                // not reveal aligned longitudinal columns.
+                float rowRotation = RandomForCell(
+                    float3(0.0, distributionRow, 0.0),
+                    0.5).x;
+                float shiftedAzimuth01 = frac(
+                    azimuth01 + rowRotation / distributionColumns);
+                float2 cell = float2(
+                    floor(shiftedAzimuth01 * distributionColumns),
+                    distributionRow);
+                float3 cell3D = float3(cell, 0.0);
+                int starsInRegion = 1 + (int)floor(
+                    RandomForCell(cell3D, 12.0).x *
+                    (float)MAX_STARS_PER_REGION);
 
-                float brightness = lerp(
-                    _MinBrightness,
-                    _MaxBrightness,
-                    RandomForCell(cell, faceId, 5.0));
-                float phase = RandomForCell(cell, faceId, 6.0) * TWO_PI;
-                float speedVariation = lerp(
-                    0.65,
-                    1.35,
-                    RandomForCell(cell, faceId, 7.0));
-                float twinkleWave = sin(_Time.y * _TwinkleSpeed * speedVariation + phase);
-                brightness *= max(0.0, twinkleWave);
+                // Project the angular offset to pixel space. This preserves the
+                // subpixel stability of the previous shader in stereo rendering.
+                float3 directionDx = ddx(direction);
+                float3 directionDy = ddy(direction);
+                float dxSquared = dot(directionDx, directionDx);
+                float dxdy = dot(directionDx, directionDy);
+                float dySquared = dot(directionDy, directionDy);
+                float determinant = max(
+                    dxSquared * dySquared - dxdy * dxdy,
+                    0.000000000001);
+                half3 accumulatedStars = 0.0h;
 
-                half star = (half)(starExists * starMask * brightness);
-                return half4(star, star, star, 1.0h);
+                // Every region contains one to three independently jittered stars.
+                // The mean remains two, but local density is less repetitive.
+                [unroll]
+                for (
+                    int starIndex = 0;
+                    starIndex < MAX_STARS_PER_REGION;
+                    starIndex++)
+                {
+                    if (starIndex >= starsInRegion)
+                    {
+                        break;
+                    }
+
+                    float saltOffset = (float)starIndex * 3.0;
+                    float3 positionRandom = RandomForCell(
+                        cell3D,
+                        1.0 + saltOffset);
+                    float2 shiftedStarUv = (
+                        cell + 0.08 + positionRandom.xy * 0.84) /
+                        distributionSize;
+                    float starU = frac(
+                        shiftedStarUv.x -
+                        rowRotation / distributionColumns);
+                    float starY = shiftedStarUv.y * 2.0 - 1.0;
+                    float starAzimuth = (starU - 0.5) * TWO_PI;
+                    float starHorizontal = sqrt(
+                        saturate(1.0 - starY * starY));
+                    float starSin;
+                    float starCos;
+                    sincos(starAzimuth, starSin, starCos);
+                    float3 starDirection = float3(
+                        starCos * starHorizontal,
+                        starY,
+                        starSin * starHorizontal);
+
+                    float3 randomA = RandomForCell(
+                        cell3D,
+                        2.0 + saltOffset);
+                    float3 randomB = RandomForCell(
+                        cell3D,
+                        3.0 + saltOffset);
+
+                    float3 directionDelta = starDirection - direction;
+                    float deltaDx = dot(directionDelta, directionDx);
+                    float deltaDy = dot(directionDelta, directionDy);
+                    float2 starPixelOffset = float2(
+                        (deltaDx * dySquared - deltaDy * dxdy) / determinant,
+                        (deltaDy * dxSquared - deltaDx * dxdy) / determinant);
+                    float starPixelDistance = length(starPixelOffset);
+
+                    float baseRadius = lerp(
+                        _MinStarRadius,
+                        _MaxStarRadius,
+                        randomA.y);
+                    float phase = randomB.y * TWO_PI;
+                    float speedVariation = lerp(0.65, 1.35, randomB.z);
+                    float radiusWave = sin(
+                        _Time.y * _TwinkleSpeed * speedVariation + phase);
+                    float twinkle01 = radiusWave * 0.5 + 0.5;
+                    float starRadius = max(
+                        0.1,
+                        baseRadius *
+                        (1.0 + radiusWave * _RadiusTwinkleAmount));
+                    float innerRadius = max(0.0, starRadius - 0.5);
+                    float starMask = 1.0 - smoothstep(
+                        innerRadius,
+                        starRadius + 0.5,
+                        starPixelDistance);
+
+                    float brightness = lerp(
+                        _MinBrightness,
+                        _MaxBrightness,
+                        randomB.x);
+                    brightness *= lerp(
+                        1.0 - _BrightnessTwinkleAmount,
+                        1.0,
+                        twinkle01);
+                    float3 starColor = lerp(
+                        float3(1.0, 1.0, 1.0),
+                        _BlueStarColor.rgb,
+                        randomA.z);
+
+                    accumulatedStars += (half3)(
+                        starMask * brightness * starColor);
+                }
+
+                return half4(saturate(accumulatedStars), 1.0h);
             }
             ENDHLSL
         }

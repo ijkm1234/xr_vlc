@@ -14,7 +14,6 @@ using Unity.XR.PXR;
 public class VlcLibraryLauncher : MonoBehaviour
 {
     private const int FlagActivityNewTask = 0x10000000;
-    private const string ExtraDeferVlcForegroundMs = "org.videolan.vlc.extra.XR_DEFER_FOREGROUND_MS";
     private const string PlaybackServiceBridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
 
     public static VlcLibraryLauncher Instance { get; private set; }
@@ -37,6 +36,7 @@ public class VlcLibraryLauncher : MonoBehaviour
 
     private XRInputModalityManager m_ModalityManager;
     private bool? m_LastObservedXrFocused;
+    private bool? m_LastObservedAarTaskVisible;
     private bool m_HasOpenedVlcLibraryOnStart;
     private bool m_ExternalMediaLaunchHandled;
     private VlcFocusRestoreHandler m_FocusRestoreHandler;
@@ -105,6 +105,9 @@ public class VlcLibraryLauncher : MonoBehaviour
     // anything → Focused: session fully regained input focus
     private void OnSessionStateChanged(XrSessionState state)
     {
+        if (state == XrSessionState.Visible || state == XrSessionState.Focused)
+            ColdStartSplashOverlay.MarkXrVisible();
+
         ApplyXrFocusState(state == XrSessionState.Focused, $"SessionStateChanged({state})");
     }
 
@@ -149,29 +152,89 @@ public class VlcLibraryLauncher : MonoBehaviour
 
     private void ApplyXrFocusState(bool focused, string source)
     {
-        if (m_LastObservedXrFocused.HasValue &&
-            m_LastObservedXrFocused.Value == focused)
-            return;
+        if (focused)
+            ColdStartSplashOverlay.MarkXrVisible();
+
+        bool aarTaskVisible = ResolveAarTaskVisibility(focused);
+        bool focusChanged = !m_LastObservedXrFocused.HasValue ||
+            m_LastObservedXrFocused.Value != focused;
+        bool aarVisibilityChanged = !m_LastObservedAarTaskVisible.HasValue ||
+            m_LastObservedAarTaskVisible.Value != aarTaskVisible;
 
         m_LastObservedXrFocused = focused;
-        Debug.Log($"[VlcLibraryLauncher] XR focus corrected: focused={focused}, source={source}");
+        m_LastObservedAarTaskVisible = aarTaskVisible;
 
-        ApplyControllerAndRayFocus(focused);
+        if (focusChanged)
+            Debug.Log($"[VlcLibraryLauncher] XR focus corrected: focused={focused}, source={source}");
+        if (aarVisibilityChanged)
+            Debug.Log($"[VlcLibraryLauncher] AAR task visibility corrected: visible={aarTaskVisible}, source={source}");
 
-        if (focused)
-            BeginFocusedUiWork();
-        else
+        ApplyControllerAndRayFocus(focused, aarTaskVisible, source);
+
+        if (!focusChanged && !aarVisibilityChanged)
+            return;
+
+        if (!focused)
+        {
             HandleUnityXrFocusLost();
+            return;
+        }
+
+        if (aarTaskVisible)
+        {
+            CancelFocusedUiWork();
+            EnsureHomePanelController()?.SetVisible(false);
+            return;
+        }
+
+        BeginFocusedUiWork();
     }
 
-    // Controller/ray visibility is intentionally isolated from AAR and Home-panel
-    // business state. Every focus source converges on this idempotent handler.
-    private void ApplyControllerAndRayFocus(bool focused)
+    private bool ResolveAarTaskVisibility(bool focused)
     {
-        if (focused)
-            EnsureFocusRestoreHandler().TriggerRestore();
+        bool visible = m_AarVisible || m_LastObservedAarTaskVisible == true;
+        bool shouldQuery = focused &&
+            (m_LastObservedXrFocused != true || visible);
+        if (shouldQuery && TryGetVlcTaskVisible(out bool queriedVisible))
+        {
+            visible = queriedVisible;
+            m_AarVisible = queriedVisible;
+        }
+
+        return visible;
+    }
+
+    // PICO can report the Unity OpenXR session as focused while the Android AAR
+    // remains visible on another display. Restore controllers only when Unity is
+    // focused and the AAR task has actually left the foreground.
+    private void ApplyControllerAndRayFocus(bool focused, bool aarTaskVisible, string source)
+    {
+        bool shouldBeVisible = focused && !aarTaskVisible;
+        VlcFocusRestoreHandler restoreHandler = EnsureFocusRestoreHandler();
+        bool isActuallyVisible = restoreHandler.AreControllerVisualsVisible();
+        bool isVisibilitySuppressed = restoreHandler.IsVisibilitySuppressed;
+
+        if (shouldBeVisible)
+        {
+            // An untracked controller can legitimately have no active renderer. Restore
+            // only when this handler is still suppressing its visual state.
+            if (!isVisibilitySuppressed)
+                return;
+        }
+        else if (isVisibilitySuppressed && !isActuallyVisible)
+        {
+            return;
+        }
+
+        Debug.Log(
+            $"[VlcLibraryLauncher] Controller visibility corrected: visible={shouldBeVisible}, " +
+            $"actualVisible={isActuallyVisible}, visibilitySuppressed={isVisibilitySuppressed}, " +
+            $"xrFocused={focused}, aarTaskVisible={aarTaskVisible}, source={source}");
+
+        if (shouldBeVisible)
+            restoreHandler.TriggerRestore();
         else
-            EnsureFocusRestoreHandler().HideControllers();
+            restoreHandler.HideControllers();
     }
 
     private void HandleUnityXrFocusLost()
@@ -225,6 +288,11 @@ public class VlcLibraryLauncher : MonoBehaviour
                 {
                     m_RestoreAarAfterSystemPanel = false;
                     m_AarVisible = true;
+                    m_LastObservedAarTaskVisible = true;
+                    ApplyControllerAndRayFocus(
+                        m_LastObservedXrFocused == true,
+                        true,
+                        "AAR task restored after system panel");
                     Debug.Log("[VlcLibraryLauncher] AAR restore cooldown elapsed; restored AAR after system panel.");
                     m_FocusedUiCoroutine = null;
                     yield break;
@@ -466,19 +534,23 @@ public class VlcLibraryLauncher : MonoBehaviour
         return m_HomePanelController;
     }
 
-    private void PrepareVlcLaunch(bool waitForDeferredVlcReady)
+    private void PrepareVlcLaunch()
     {
         m_AarVisible = false;
         m_AwaitingPlaybackStartAfterAarReturn = false;
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
-        Debug.Log(
-            $"[VlcLibraryLauncher] AAR launch requested; deferredForeground={waitForDeferredVlcReady}.");
+        Debug.Log("[VlcLibraryLauncher] AAR launch requested by Unity.");
     }
 
     private void MarkVlcActivityVisible()
     {
         m_AarVisible = true;
+        m_LastObservedAarTaskVisible = true;
+        ApplyControllerAndRayFocus(
+            m_LastObservedXrFocused == true,
+            true,
+            "OnVlcActivityReady");
         CancelFocusedUiWork();
         EnsureHomePanelController()?.SetVisible(false);
     }
@@ -544,7 +616,7 @@ public class VlcLibraryLauncher : MonoBehaviour
     }
 
     /// <summary>
-    /// 启动后延迟一帧打开 VLC 媒体库，确保 Activity、XR 和焦点恢复组件完成初始化。
+    /// XR 首次可见后由 Unity 保持 Splash 至少 500ms，再打开 VLC 媒体库。
     /// </summary>
     private IEnumerator OpenVlcLibraryOnStart()
     {
@@ -553,7 +625,24 @@ public class VlcLibraryLauncher : MonoBehaviour
         if (m_HasOpenedVlcLibraryOnStart) yield break;
         m_HasOpenedVlcLibraryOnStart = true;
 
-        OpenVLCMediaLibrary(deferForegroundUntilColdStartSplashElapsed: true);
+        Debug.Log("[VlcLibraryLauncher] Waiting for Unity-controlled cold-start delay.");
+        while (!ColdStartSplashOverlay.HasReachedMinimumVisibleTime)
+        {
+            if (m_ExternalMediaLaunchHandled)
+                yield break;
+
+            yield return null;
+        }
+
+        // Let the frame that satisfies the duration reach the XR compositor before
+        // handing foreground control to the Android 2D activity.
+        yield return new WaitForEndOfFrame();
+
+        if (m_ExternalMediaLaunchHandled)
+            yield break;
+
+        Debug.Log("[VlcLibraryLauncher] Unity-controlled cold-start delay elapsed; launching VLC Activity.");
+        OpenVLCMediaLibrary();
     }
 
     /// <summary>
@@ -578,11 +667,6 @@ public class VlcLibraryLauncher : MonoBehaviour
 
     public void OpenVLCMediaLibrary()
     {
-        OpenVLCMediaLibrary(deferForegroundUntilColdStartSplashElapsed: false);
-    }
-
-    private void OpenVLCMediaLibrary(bool deferForegroundUntilColdStartSplashElapsed)
-    {
         EnsureHomePanelController()?.SetVisible(false);
 
         if (Application.platform != RuntimePlatform.Android)
@@ -591,18 +675,18 @@ public class VlcLibraryLauncher : MonoBehaviour
             return;
         }
 
-        StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);
+        StartVLCActivity();
     }
 
-    private void StartVLCActivity(bool deferForegroundUntilColdStartSplashElapsed = false)
+    private void StartVLCActivity()
     {
-        PrepareVlcLaunch(deferForegroundUntilColdStartSplashElapsed);
+        PrepareVlcLaunch();
         try
         {
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
             using (AndroidJavaObject currentActivity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
             {
-                RestoreVlcTaskOrStartFallback(currentActivity, deferForegroundUntilColdStartSplashElapsed);
+                RestoreVlcTaskOrStartFallback(currentActivity);
             }
             Debug.Log("已发送启动 VLC 媒体库 Intent");
         }
@@ -614,37 +698,32 @@ public class VlcLibraryLauncher : MonoBehaviour
         }
     }
 
-    private void RestoreVlcTaskOrStartFallback(AndroidJavaObject currentActivity, bool deferForegroundUntilColdStartSplashElapsed)
+    private void RestoreVlcTaskOrStartFallback(AndroidJavaObject currentActivity)
     {
-        if (!deferForegroundUntilColdStartSplashElapsed)
+        try
         {
-            try
+            using (AndroidJavaClass bridge = new AndroidJavaClass(PlaybackServiceBridgeClassName))
             {
-                using (AndroidJavaClass bridge = new AndroidJavaClass(PlaybackServiceBridgeClassName))
+                if (bridge.CallStatic<bool>("restoreVlcTask", currentActivity))
                 {
-                    if (bridge.CallStatic<bool>("restoreVlcTask", currentActivity))
-                    {
-                        Debug.Log("已恢复现有 VLC task。");
-                        return;
-                    }
+                    Debug.Log("已恢复现有 VLC task。");
+                    return;
                 }
             }
-            catch (Exception bridgeException)
-            {
-                Debug.LogWarning("恢复现有 VLC task 失败，改用启动入口: " + bridgeException.Message);
-            }
+        }
+        catch (Exception bridgeException)
+        {
+            Debug.LogWarning("恢复现有 VLC task 失败，改用启动入口: " + bridgeException.Message);
         }
 
-        StartVlcStartActivity(currentActivity, deferForegroundUntilColdStartSplashElapsed);
+        StartVlcStartActivity(currentActivity);
     }
 
-    private void StartVlcStartActivity(AndroidJavaObject currentActivity, bool deferForegroundUntilColdStartSplashElapsed)
+    private void StartVlcStartActivity(AndroidJavaObject currentActivity)
     {
         using (AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent", currentActivity, new AndroidJavaClass("org.videolan.vlc.StartActivity")))
         {
             intent.Call<AndroidJavaObject>("addFlags", FlagActivityNewTask);
-            if (deferForegroundUntilColdStartSplashElapsed)
-                intent.Call<AndroidJavaObject>("putExtra", ExtraDeferVlcForegroundMs, ColdStartSplashOverlay.MinimumVisibleMilliseconds);
             currentActivity.Call("startActivity", intent);
         }
     }

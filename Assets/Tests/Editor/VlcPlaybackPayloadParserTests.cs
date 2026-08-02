@@ -875,9 +875,9 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("override fun onUserLeaveHint()", mainActivitySource);
             StringAssert.DoesNotContain("VLC/HomeProbe", mainActivitySource);
             StringAssert.DoesNotContain("finishAndRemoveTask()", mainActivitySource);
-            StringAssert.Contains("private fun maybeDeferVlcForeground()", mainActivitySource);
-            StringAssert.Contains("val delayMs = intent.getIntExtra(EXTRA_DEFER_VLC_FOREGROUND_MS, 0)", mainActivitySource);
-            StringAssert.Contains("moveTaskToBack(true)", mainActivitySource);
+            StringAssert.DoesNotContain("private fun maybeDeferVlcForeground()", mainActivitySource);
+            StringAssert.DoesNotContain("EXTRA_DEFER_VLC_FOREGROUND_MS", mainActivitySource);
+            StringAssert.DoesNotContain("moveTaskToBack(true)", mainActivitySource);
             StringAssert.Contains("AppContextProvider.currentActivity = this", mainActivitySource);
             StringAssert.Contains("AppContextProvider.aliveActivities", mainActivitySource);
         }

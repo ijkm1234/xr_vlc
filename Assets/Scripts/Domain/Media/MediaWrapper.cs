@@ -32,6 +32,8 @@ namespace XRVLC.Media
         
         public bool FromStart { get; set; }
         public int PositionInList { get; set; }
+        public string Source { get; set; }
+        public string MediaType { get; set; }
         public List<SlaveDTO> Slaves { get; set; } = new List<SlaveDTO>();
         
         // 存储从 Android 端传来的原始 JSON，以便在播放时原样透传回底层

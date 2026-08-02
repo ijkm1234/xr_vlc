@@ -21,6 +21,8 @@ public class VlcFocusRestoreHandler
     private bool[] m_HiddenVisualBehaviourWasEnabled = Array.Empty<bool>();
     private bool? m_ModalityManagerWasEnabled;
 
+    public bool IsVisibilitySuppressed => _hiddenByFocusLoss;
+
     public VlcFocusRestoreHandler(
         MonoBehaviour owner,
         Func<GameObject[]> objectsProvider,
@@ -43,7 +45,36 @@ public class VlcFocusRestoreHandler
             if (_restoreCoroutine != null)
                 CancelRestore();
 
-            Debug.Log("[VlcFocusRestore] HideControllers ignored; controllers are already hidden by focus loss.");
+            GameObject[] currentObjects = _objectsProvider?.Invoke() ?? Array.Empty<GameObject>();
+            bool wasActuallyVisible = AreControllerVisualsVisible(currentObjects);
+            CaptureAdditionalVisualState(
+                currentObjects,
+                out int addedRendererCount,
+                out int addedVisualBehaviourCount);
+
+            XRInputModalityManager currentModalityManager = _modalityManagerProvider?.Invoke();
+            bool modalityManagerWasEnabled = currentModalityManager != null && currentModalityManager.enabled;
+            if (currentModalityManager != null)
+            {
+                if (!m_ModalityManagerWasEnabled.HasValue)
+                    m_ModalityManagerWasEnabled = currentModalityManager.enabled;
+
+                currentModalityManager.enabled = false;
+            }
+
+            m_HiddenObjects = currentObjects;
+            HideVisualState();
+
+            if (wasActuallyVisible || modalityManagerWasEnabled ||
+                addedRendererCount > 0 || addedVisualBehaviourCount > 0)
+            {
+                Debug.Log(
+                    $"[VlcFocusRestore] Reapplied hidden state from actual visuals; " +
+                    $"wasActuallyVisible={wasActuallyVisible}; addedRenderers={addedRendererCount}; " +
+                    $"addedVisualBehaviours={addedVisualBehaviourCount}; " +
+                    $"XRInputModalityManager={DescribeModalityManager(currentModalityManager)}");
+            }
+
             return;
         }
 
@@ -155,8 +186,33 @@ public class VlcFocusRestoreHandler
 
     private void CaptureVisualState(GameObject[] objects)
     {
-        var renderers = new List<Renderer>();
-        var visualBehaviours = new List<Behaviour>();
+        m_HiddenRenderers = Array.Empty<Renderer>();
+        m_HiddenRendererWasEnabled = Array.Empty<bool>();
+        m_HiddenVisualBehaviours = Array.Empty<Behaviour>();
+        m_HiddenVisualBehaviourWasEnabled = Array.Empty<bool>();
+
+        CaptureAdditionalVisualState(objects, out _, out _);
+
+        Debug.Log($"[VlcFocusRestore] Captured visual state; renderers={m_HiddenRenderers.Length}; visualBehaviours={m_HiddenVisualBehaviours.Length}");
+    }
+
+    private void CaptureAdditionalVisualState(
+        GameObject[] objects,
+        out int addedRendererCount,
+        out int addedVisualBehaviourCount)
+    {
+        var renderers = new List<Renderer>(m_HiddenRenderers ?? Array.Empty<Renderer>());
+        var rendererWasEnabled = new List<bool>(m_HiddenRendererWasEnabled ?? Array.Empty<bool>());
+        while (rendererWasEnabled.Count < renderers.Count)
+            rendererWasEnabled.Add(false);
+
+        var visualBehaviours = new List<Behaviour>(m_HiddenVisualBehaviours ?? Array.Empty<Behaviour>());
+        var visualBehaviourWasEnabled = new List<bool>(m_HiddenVisualBehaviourWasEnabled ?? Array.Empty<bool>());
+        while (visualBehaviourWasEnabled.Count < visualBehaviours.Count)
+            visualBehaviourWasEnabled.Add(false);
+
+        int initialRendererCount = renderers.Count;
+        int initialVisualBehaviourCount = visualBehaviours.Count;
 
         for (int i = 0; i < objects.Length; i++)
         {
@@ -164,28 +220,63 @@ public class VlcFocusRestoreHandler
             if (obj == null)
                 continue;
 
-            renderers.AddRange(obj.GetComponentsInChildren<Renderer>(true));
+            Renderer[] currentRenderers = obj.GetComponentsInChildren<Renderer>(true);
+            for (int j = 0; j < currentRenderers.Length; j++)
+            {
+                Renderer renderer = currentRenderers[j];
+                if (renderer == null || renderers.Contains(renderer))
+                    continue;
+
+                renderers.Add(renderer);
+                rendererWasEnabled.Add(renderer.enabled);
+            }
 
             Behaviour[] behaviours = obj.GetComponentsInChildren<Behaviour>(true);
             for (int j = 0; j < behaviours.Length; j++)
             {
                 Behaviour behaviour = behaviours[j];
-                if (behaviour != null && IsVisualStateBehaviour(behaviour.GetType().Name))
-                    visualBehaviours.Add(behaviour);
+                if (behaviour == null ||
+                    !IsVisualStateBehaviour(behaviour.GetType().Name) ||
+                    visualBehaviours.Contains(behaviour))
+                    continue;
+
+                visualBehaviours.Add(behaviour);
+                visualBehaviourWasEnabled.Add(behaviour.enabled);
             }
         }
 
         m_HiddenRenderers = renderers.ToArray();
-        m_HiddenRendererWasEnabled = new bool[m_HiddenRenderers.Length];
-        for (int i = 0; i < m_HiddenRenderers.Length; i++)
-            m_HiddenRendererWasEnabled[i] = m_HiddenRenderers[i] != null && m_HiddenRenderers[i].enabled;
-
+        m_HiddenRendererWasEnabled = rendererWasEnabled.ToArray();
         m_HiddenVisualBehaviours = visualBehaviours.ToArray();
-        m_HiddenVisualBehaviourWasEnabled = new bool[m_HiddenVisualBehaviours.Length];
-        for (int i = 0; i < m_HiddenVisualBehaviours.Length; i++)
-            m_HiddenVisualBehaviourWasEnabled[i] = m_HiddenVisualBehaviours[i] != null && m_HiddenVisualBehaviours[i].enabled;
+        m_HiddenVisualBehaviourWasEnabled = visualBehaviourWasEnabled.ToArray();
 
-        Debug.Log($"[VlcFocusRestore] Captured visual state; renderers={m_HiddenRenderers.Length}; visualBehaviours={m_HiddenVisualBehaviours.Length}");
+        addedRendererCount = renderers.Count - initialRendererCount;
+        addedVisualBehaviourCount = visualBehaviours.Count - initialVisualBehaviourCount;
+    }
+
+    public bool AreControllerVisualsVisible()
+    {
+        return AreControllerVisualsVisible(_objectsProvider?.Invoke() ?? Array.Empty<GameObject>());
+    }
+
+    private static bool AreControllerVisualsVisible(GameObject[] objects)
+    {
+        for (int i = 0; i < objects.Length; i++)
+        {
+            GameObject obj = objects[i];
+            if (obj == null)
+                continue;
+
+            Renderer[] renderers = obj.GetComponentsInChildren<Renderer>(true);
+            for (int j = 0; j < renderers.Length; j++)
+            {
+                Renderer renderer = renderers[j];
+                if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private void HideVisualState()

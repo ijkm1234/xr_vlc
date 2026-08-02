@@ -150,7 +150,9 @@ public static class VlcPlaybackPayloadParser
 
         string normalizedUri = DecodeBridgeUri(dto.uri);
         dto.uri = normalizedUri;
-        string title = BuildTitleFromUri(normalizedUri);
+        string title = string.IsNullOrWhiteSpace(dto.title)
+            ? BuildTitleFromUri(normalizedUri)
+            : dto.title.Trim();
 
         return new MediaWrapper
         {
@@ -160,6 +162,8 @@ public static class VlcPlaybackPayloadParser
             Time = 0,
             FromStart = false,
             PositionInList = dto.index,
+            Source = dto.source,
+            MediaType = dto.mediaType,
             Slaves = new List<SlaveDTO>(),
             Projection = MediaProjectionType.Flat2D,
             StereoHint = null,

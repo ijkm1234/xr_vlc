@@ -7,6 +7,9 @@ public static class ExternalMediaIntentBridge
     private const string ExtraExternalMedia = "org.videolan.vlc.extra.XR_EXTERNAL_MEDIA";
     private const string ExtraExternalMediaToken = "org.videolan.vlc.extra.XR_EXTERNAL_MEDIA_TOKEN";
     private const string ExtraExternalMediaConsumed = "org.videolan.vlc.extra.XR_EXTERNAL_MEDIA_CONSUMED";
+    private const string ExtraExternalMediaTitle = "org.videolan.vlc.extra.XR_EXTERNAL_MEDIA_TITLE";
+    private const string ExternalPlaybackSource = "external";
+    private const string VideoMediaType = "video";
 
     private static string s_LastDeepLinkUrl;
 
@@ -28,13 +31,14 @@ public static class ExternalMediaIntentBridge
 
                     string action = intent.Call<string>("getAction");
                     string dataString = intent.Call<string>("getDataString");
+                    string title = intent.Call<string>("getStringExtra", ExtraExternalMediaTitle);
                     bool isExternalMedia = intent.Call<bool>("getBooleanExtra", ExtraExternalMedia, false);
                     bool isConsumed = intent.Call<bool>("getBooleanExtra", ExtraExternalMediaConsumed, false);
 
                     if (action != ActionView || string.IsNullOrEmpty(dataString) || !isExternalMedia || isConsumed)
                         return false;
 
-                    payload = BuildStartPlayPayload(dataString);
+                    payload = BuildStartPlayPayload(dataString, title);
                     intent.Call<AndroidJavaObject>("putExtra", ExtraExternalMediaConsumed, true);
                     s_LastDeepLinkUrl = dataString;
                     Debug.Log($"[ExternalMediaIntentBridge] Consumed external media intent: {RedactUri(dataString)}");
@@ -60,17 +64,20 @@ public static class ExternalMediaIntentBridge
             return false;
 
         s_LastDeepLinkUrl = url;
-        payload = BuildStartPlayPayload(url);
+        payload = BuildStartPlayPayload(url, null);
         Debug.Log($"[ExternalMediaIntentBridge] Consumed external media deep link: {RedactUri(url)}");
         return true;
     }
 
-    private static string BuildStartPlayPayload(string uri)
+    private static string BuildStartPlayPayload(string uri, string title)
     {
         return JsonUtility.ToJson(new ExternalMediaPayload
         {
             uri = uri,
-            index = 0
+            title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
+            index = 0,
+            source = ExternalPlaybackSource,
+            mediaType = VideoMediaType
         });
     }
 
@@ -86,6 +93,9 @@ public static class ExternalMediaIntentBridge
     private class ExternalMediaPayload
     {
         public string uri;
+        public string title;
         public int index;
+        public string source;
+        public string mediaType;
     }
 }

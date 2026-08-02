@@ -38,7 +38,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("StartCoroutine(HandleStartupLaunch());", source);
             StringAssert.Contains("private IEnumerator HandleStartupLaunch()", source);
             StringAssert.Contains("private IEnumerator OpenVlcLibraryOnStart()", source);
-            StringAssert.Contains("StartVLCActivity(deferForegroundUntilColdStartSplashElapsed);", source);
+            StringAssert.Contains("StartVLCActivity();", source);
             StringAssert.DoesNotContain("m_OpenVlcAfterPermissionGranted", source);
             StringAssert.DoesNotContain("RequestRequiredPermissions", source);
             StringAssert.DoesNotContain("Permission.RequestUserPermissions", source);
@@ -94,54 +94,44 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void StartupLaunch_DefersVlcForegroundWithoutDelayingOpenCall()
+        public void StartupLaunch_WaitsInUnityAfterXrBecomesVisible()
         {
             string launcherSource = ReadLauncherSource();
 
-            StringAssert.Contains("OpenVLCMediaLibrary(deferForegroundUntilColdStartSplashElapsed: true);", launcherSource);
-            StringAssert.DoesNotContain("yield return ColdStartSplashOverlay.WaitForMinimumVisibleTime();", launcherSource);
-            StringAssert.Contains("private const string ExtraDeferVlcForegroundMs", launcherSource);
-            StringAssert.Contains("intent.Call<AndroidJavaObject>(\"putExtra\", ExtraDeferVlcForegroundMs, ColdStartSplashOverlay.MinimumVisibleMilliseconds);", launcherSource);
-            StringAssert.Contains("RestoreVlcTaskOrStartFallback(currentActivity, deferForegroundUntilColdStartSplashElapsed);", launcherSource);
-            StringAssert.Contains("StartVlcStartActivity(currentActivity, deferForegroundUntilColdStartSplashElapsed);", launcherSource);
+            StringAssert.Contains("while (!ColdStartSplashOverlay.HasReachedMinimumVisibleTime)", launcherSource);
+            StringAssert.Contains("yield return new WaitForEndOfFrame();", launcherSource);
+            StringAssert.Contains("OpenVLCMediaLibrary();", launcherSource);
+            StringAssert.DoesNotContain("ExtraDeferVlcForegroundMs", launcherSource);
+            StringAssert.DoesNotContain("deferForegroundUntilColdStartSplashElapsed", launcherSource);
         }
 
         [Test]
-        public void VlcStartActivity_ForwardsForegroundDelayRequestWithoutDelayingResume()
+        public void VlcStartActivity_StartsMainActivityWithoutForegroundDelay()
         {
             string path = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/StartActivity.kt");
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("private const val EXTRA_DEFER_VLC_FOREGROUND_MS", source);
             StringAssert.Contains("resume()", source);
-            StringAssert.Contains("val foregroundDelayMs = requestedForegroundDelayMs()", source);
-            StringAssert.Contains("mainIntent.putExtra(EXTRA_DEFER_VLC_FOREGROUND_MS, foregroundDelayMs)", source);
-            StringAssert.Contains("moveTaskToBack(true)", source);
-            StringAssert.DoesNotContain("private fun resumeAfterRequestedForegroundDelay()", source);
-            StringAssert.DoesNotContain("delay(delayMs.toLong())", source);
-            StringAssert.DoesNotContain("import kotlinx.coroutines.delay", source);
+            StringAssert.Contains("startActivity(mainIntent)", source);
+            StringAssert.DoesNotContain("EXTRA_DEFER_VLC_FOREGROUND_MS", source);
+            StringAssert.DoesNotContain("requestedForegroundDelayMs", source);
+            StringAssert.DoesNotContain("moveTaskToBack(true)", source);
         }
 
         [Test]
-        public void VlcMainActivity_NotifiesUnityWhenStartedAndDefersColdStartForeground()
+        public void VlcMainActivity_NotifiesUnityWithoutManagingColdStartDelay()
         {
             string path = Path.Combine(Application.dataPath, "..", "..", "vlc-android/application/vlc-android/src/org/videolan/vlc/gui/MainActivity.kt");
             string source = File.ReadAllText(path);
 
-            StringAssert.Contains("private const val EXTRA_DEFER_VLC_FOREGROUND_MS", source);
-            StringAssert.Contains("private val mainHandler = Handler(Looper.getMainLooper())", source);
-            StringAssert.Contains("private var deferredForegroundHandled = false", source);
             StringAssert.Contains("override fun onStart()", source);
             StringAssert.Contains("notifyUnityVlcActivityReady()", source);
-            StringAssert.Contains("maybeDeferVlcForeground()", source);
-            StringAssert.Contains("private fun maybeDeferVlcForeground()", source);
-            StringAssert.Contains("moveTaskToBack(true)", source);
-            StringAssert.Contains("mainHandler.postDelayed({", source);
-            StringAssert.Contains("bringVlcTaskToFront()", source);
-            StringAssert.Contains("appTask.moveToFront()", source);
+            StringAssert.DoesNotContain("EXTRA_DEFER_VLC_FOREGROUND_MS", source);
+            StringAssert.DoesNotContain("maybeDeferVlcForeground", source);
+            StringAssert.DoesNotContain("bringVlcTaskToFront", source);
+            StringAssert.DoesNotContain("moveTaskToBack(true)", source);
+            StringAssert.DoesNotContain("mainHandler.postDelayed", source);
             StringAssert.DoesNotContain("override fun onWindowFocusChanged(hasFocus: Boolean)", source);
-            StringAssert.Contains("override fun onNewIntent(intent: Intent)", source);
-            StringAssert.Contains("setIntent(intent)", source);
         }
 
         [Test]
@@ -149,8 +139,7 @@ namespace XRVLC.Tests
         {
             string source = ReadLauncherSource();
 
-            StringAssert.Contains("RestoreVlcTaskOrStartFallback(currentActivity, deferForegroundUntilColdStartSplashElapsed);", source);
-            StringAssert.Contains("if (!deferForegroundUntilColdStartSplashElapsed)", source);
+            StringAssert.Contains("RestoreVlcTaskOrStartFallback(currentActivity);", source);
             StringAssert.Contains("restoreVlcTask", source);
             StringAssert.Contains("if (bridge.CallStatic<bool>(\"restoreVlcTask\", currentActivity))", source);
             StringAssert.Contains("FlagActivityNewTask", source);
