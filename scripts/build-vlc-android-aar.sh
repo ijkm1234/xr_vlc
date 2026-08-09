@@ -4,7 +4,6 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_root="$(cd "$project_root/.." && pwd)"
 vlc_root="${VLC_ANDROID_ROOT:-$workspace_root/vlc-android}"
-vlc_source_root="${VLC_SRC_DIR:-$workspace_root/lib-vlc}"
 local_properties="$vlc_root/local.properties"
 native_gradle_version="8.6"
 
@@ -14,11 +13,6 @@ read_property() {
 
 if [[ ! -f "$local_properties" ]]; then
     echo "Missing $local_properties. Configure the Android SDK and NDK first." >&2
-    exit 1
-fi
-
-if [[ ! -d "$vlc_source_root/.git" ]]; then
-    echo "Missing standalone libVLC source repository at $vlc_source_root." >&2
     exit 1
 fi
 
@@ -48,16 +42,17 @@ fi
 
 export ANDROID_SDK="$android_sdk"
 export ANDROID_NDK="$android_ndk"
-export VLC_SRC_DIR="$vlc_source_root"
 export VLC_LIBJNI_PATH="$vlc_root/libvlcjni"
 
 cd "$vlc_root"
-SKIP_LIBVLC_GRADLE_BUILD=1 \
-    ./buildsystem/compile.sh -a arm64-v8a -l -b
+# The outer repository downloads pinned libvlcjni/VLC sources on the first
+# build and reuses the local checkouts and contrib cache afterwards.
+./buildsystem/compile.sh -a arm64-v8a -l
 
 # Package from the outer project. Its Gradle 8.6 / AGP 8.3.2 configuration
 # also includes the freshly built libvlcjni native libraries in the fat AAR.
 GRADLE_ABI=arm64-v8a ./gradlew \
+    -PxrFatAar=true \
     :application:vlc-android:clean \
     :application:vlc-android:assembleDebug
 
