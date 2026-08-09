@@ -18,7 +18,8 @@ build/
 output.apk
 output-*.symbols.zip
 output_BackUpThisFolder_ButDontShipItWithYourGame/
-xr_vlc_BurstDebugInformation_DoNotShip/
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+*_BurstDebugInformation_DoNotShip/
 diagnostic-builds/
 Assets/_Recovery/
 Assets/_Recovery.meta
