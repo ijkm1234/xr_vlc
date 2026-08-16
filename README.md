@@ -53,6 +53,12 @@ package 所需的项目内相对链接。PICO SDK 源码和本地链接均不提
 ./scripts/build-vlc-android-aar.sh
 ```
 
+正式 APK 使用 release variant AAR：
+
+```bash
+VLC_ANDROID_AAR_VARIANT=release ./scripts/build-vlc-android-aar.sh
+```
+
 若同级目录中不存在 `vlc-android`，脚本会从公开 HTTPS 仓库克隆并切换到
 固定提交；如果目录已存在，脚本不会自动 pull 或 reset，而会校验提交和
 tracked 文件状态。只有明确需要编译本地开发源码时才使用：
@@ -61,7 +67,7 @@ tracked 文件状态。只有明确需要编译本地开发源码时才使用：
 VLC_ANDROID_USE_LOCAL=1 ./scripts/build-vlc-android-aar.sh
 ```
 
-最终产物位于 `Assets/Plugins/Android/vlc-android-debug.aar`。AAR、APK、
+最终产物位于 `Assets/Plugins/Android/vlc-android-<variant>.aar`。AAR、APK、
 下载的依赖源码和构建中间产物均由 `.gitignore` 排除。
 
 ## License

@@ -8,11 +8,20 @@ workspace_root="$(cd "$project_root/.." && pwd)"
 vlc_root="$workspace_root/vlc-android"
 vlc_repository="${VLC_ANDROID_REPOSITORY:-https://github.com/ijkm1234/vlc_android_for_xr_vlc.git}"
 vlc_branch="${VLC_ANDROID_BRANCH:-init}"
-vlc_revision="${VLC_ANDROID_REVISION:-b7789d2ebf977187eca01257e092c678ceecf5d9}"
+vlc_revision="${VLC_ANDROID_REVISION:-6d460328c51731dd5be322832db5cdf780cd1ed1}"
 vlc_use_local="${VLC_ANDROID_USE_LOCAL:-0}"
 vlc_build_script="$vlc_root/buildsystem/build-xr-aar.sh"
 local_properties="$vlc_root/local.properties"
 ndk_version="${ANDROID_NDK_VERSION:-27.3.13750724}"
+aar_variant="${VLC_ANDROID_AAR_VARIANT:-debug}"
+
+case "$aar_variant" in
+    debug|release) ;;
+    *)
+        echo "Unsupported VLC_ANDROID_AAR_VARIANT: $aar_variant (expected debug or release)" >&2
+        exit 2
+        ;;
+esac
 
 fail() {
     echo "$1" >&2
@@ -76,6 +85,7 @@ resolved_ndk_version="$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "$a
 
 export ANDROID_SDK="$android_sdk"
 export ANDROID_NDK="$android_ndk"
+export VLC_ANDROID_AAR_VARIANT="$aar_variant"
 
 if [[ ! -f "$local_properties" ]]; then
     printf 'sdk.dir=%s\nandroid.ndkPath=%s\nandroid.ndkFullVersion=%s\n' \
@@ -85,8 +95,8 @@ fi
 
 "$vlc_build_script"
 
-aar_source="$vlc_root/application/vlc-android/build/outputs/aar/vlc-android-debug.aar"
-aar_target="$project_root/Assets/Plugins/Android/vlc-android-debug.aar"
+aar_source="$vlc_root/application/vlc-android/build/outputs/aar/vlc-android-$aar_variant.aar"
+aar_target="$project_root/Assets/Plugins/Android/vlc-android-$aar_variant.aar"
 
 cp "$aar_source" "$aar_target"
 cmp -s "$aar_source" "$aar_target"
