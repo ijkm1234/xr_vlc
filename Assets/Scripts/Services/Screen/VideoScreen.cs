@@ -550,7 +550,7 @@ namespace XRVLC
             if (targetCamera == null)
                 return;
 
-            if (_passthroughBackgroundEnabled)
+            if (_passthroughBackgroundEnabled || VlcLibraryLauncher.IsAarTaskVisible)
             {
                 targetCamera.clearFlags = CameraClearFlags.SolidColor;
                 targetCamera.backgroundColor = new Color(0f, 0f, 0f, 0f);

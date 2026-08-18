@@ -17,6 +17,7 @@ public class VlcLibraryLauncher : MonoBehaviour
     private const string PlaybackServiceBridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
 
     public static VlcLibraryLauncher Instance { get; private set; }
+    public static bool IsAarTaskVisible => Instance != null && Instance.m_AarVisible;
 
     public event Action<string, string> OnVideoSelectedEvent { add { } remove { } }
 

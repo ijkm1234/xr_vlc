@@ -272,8 +272,8 @@ PlayerSettings:
   AndroidAllowedArchitectures: -13
   AndroidSplashScreenScale: 0
   androidSplashScreen: {fileID: 0}
-  AndroidKeystoreName: 
-  AndroidKeyaliasName: 
+  AndroidKeystoreName: /Users/admin/.xrvlc-signing/xrvlc-release.jks
+  AndroidKeyaliasName: xrvlc-release
   AndroidEnableArmv9SecurityFeatures: 0
   AndroidEnableArm64MTE: 0
   AndroidBuildApkPerCpuArchitecture: 0
@@ -285,7 +285,7 @@ PlayerSettings:
   AndroidEnableTango: 0
   androidEnableBanner: 1
   androidUseLowAccuracyLocation: 0
-  androidUseCustomKeystore: 0
+  androidUseCustomKeystore: 1
   m_AndroidBanners:
   - width: 320
     height: 180
@@ -400,42 +400,42 @@ PlayerSettings:
     m_Icons:
     - m_Textures:
       - {fileID: 2800000, guid: fce22dbaff6b6a21c53db2785bba7c12, type: 3}
-      - {fileID: 2800000, guid: 6c9ce0f7da1f47186955254c1f5e8134, type: 3}
+      - {fileID: 2800000, guid: fce22dbaff6b6a21c53db2785bba7c12, type: 3}
       m_Width: 432
       m_Height: 432
       m_Kind: 2
       m_SubKind: 
     - m_Textures:
       - {fileID: 2800000, guid: a108f9d690a6e98637fc26d7df531457, type: 3}
-      - {fileID: 2800000, guid: 633463dbae4ca15d150a302671a9b0b6, type: 3}
+      - {fileID: 2800000, guid: a108f9d690a6e98637fc26d7df531457, type: 3}
       m_Width: 324
       m_Height: 324
       m_Kind: 2
       m_SubKind: 
     - m_Textures:
       - {fileID: 2800000, guid: 6e507173d1777beeec6d7942ce1ba4ff, type: 3}
-      - {fileID: 2800000, guid: c2d94b6a708c4a96a3bb5deb7d14951f, type: 3}
+      - {fileID: 2800000, guid: 6e507173d1777beeec6d7942ce1ba4ff, type: 3}
       m_Width: 216
       m_Height: 216
       m_Kind: 2
       m_SubKind: 
     - m_Textures:
       - {fileID: 2800000, guid: 51fd0e01c109a679117b98db52cf0d16, type: 3}
-      - {fileID: 2800000, guid: 560d53010d0d725ab6f944e5c7beea14, type: 3}
+      - {fileID: 2800000, guid: 51fd0e01c109a679117b98db52cf0d16, type: 3}
       m_Width: 162
       m_Height: 162
       m_Kind: 2
       m_SubKind: 
     - m_Textures:
       - {fileID: 2800000, guid: 4d46b0f39982b7cf2da70ce0dd4d102a, type: 3}
-      - {fileID: 2800000, guid: 41a023bbfd7e0fb6eb42d07bdb5dca81, type: 3}
+      - {fileID: 2800000, guid: 4d46b0f39982b7cf2da70ce0dd4d102a, type: 3}
       m_Width: 108
       m_Height: 108
       m_Kind: 2
       m_SubKind: 
     - m_Textures:
       - {fileID: 2800000, guid: 0b3dcebc547a4770d315ddd8d414cf3c, type: 3}
-      - {fileID: 2800000, guid: 96417367d989bfbe684cbac16f77fce7, type: 3}
+      - {fileID: 2800000, guid: 0b3dcebc547a4770d315ddd8d414cf3c, type: 3}
       m_Width: 81
       m_Height: 81
       m_Kind: 2
