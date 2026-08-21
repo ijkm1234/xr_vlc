@@ -76,6 +76,7 @@ namespace XRVLC
         private uint _flatSubtitleContentWidth;
         private uint _flatSubtitleContentHeight;
         private bool _flatSubtitleRenderOutsideScreen;
+        private bool _flatSubtitleAttachToVideoSurface;
         private bool _hasFlatSubtitleLayerGeometry;
         private VideoProjection _currentProjection = VideoProjection.Flat;
         private StereoMode _currentStereo = StereoMode.Mono;
@@ -565,10 +566,19 @@ namespace XRVLC
             }
 
             targetCamera.clearFlags = CameraClearFlags.SolidColor;
-            bool screenVisible = IsHardwareSurfaceReady() && IsVideoScreenInCameraView(targetCamera);
-            targetCamera.backgroundColor = screenVisible
+            bool hasVisibleScreen = HasVisibleVideoScreenInScene();
+            bool screenInCameraView = hasVisibleScreen && IsVideoScreenInCameraView(targetCamera);
+            targetCamera.backgroundColor = !hasVisibleScreen || screenInCameraView
                 ? new Color(0f, 0f, 0f, 0f)
                 : new Color(0.24f, 0.24f, 0.24f, 1f);
+        }
+
+        private bool HasVisibleVideoScreenInScene()
+        {
+            return isActiveAndEnabled
+                && videoAnchor != null
+                && videoAnchor.gameObject.activeInHierarchy
+                && IsHardwareSurfaceReady();
         }
 
         private bool IsVideoScreenInCameraView(Camera targetCamera)
@@ -826,23 +836,21 @@ namespace XRVLC
         {
             DestroyFlatSubtitleLayer();
             _renderSurface?.DestroyLayer();
-            if (RenderSettings.skybox == null && !_passthroughBackgroundEnabled)
-            {
-                Camera targetCamera = GetMainCamera();
-                if (targetCamera != null)
-                {
-                    targetCamera.clearFlags = CameraClearFlags.SolidColor;
-                    targetCamera.backgroundColor = new Color(0.24f, 0.24f, 0.24f, 1f);
-                }
-            }
+            UpdateFlatUnderlayBackground();
         }
 
-        public bool RebuildFlatSubtitleLayer(uint surfaceWidth, uint surfaceHeight, uint contentWidth, uint contentHeight, bool renderOutsideScreen = false)
+        public bool RebuildFlatSubtitleLayer(
+            uint surfaceWidth,
+            uint surfaceHeight,
+            uint contentWidth,
+            uint contentHeight,
+            bool renderOutsideScreen = false,
+            bool attachToVideoSurface = false)
         {
             Debug.Log(
                 $"[VideoScreen] Flat subtitle layer rebuild entry: projection={_currentProjection}, " +
                 $"videoAnchorNull={videoAnchor == null}, surfaceSize={surfaceWidth}x{surfaceHeight}, contentSize={contentWidth}x{contentHeight}, " +
-                $"stereo={_currentStereo}, outside={renderOutsideScreen}, " +
+                $"stereo={_currentStereo}, outside={renderOutsideScreen}, attachToVideo={attachToVideoSurface}, " +
                 $"anchorScale={(videoAnchor != null ? videoAnchor.localScale.ToString() : "null")}");
 
             if (videoAnchor == null)
@@ -867,9 +875,14 @@ namespace XRVLC
             _flatSubtitleContentWidth = contentWidth;
             _flatSubtitleContentHeight = contentHeight;
             _flatSubtitleRenderOutsideScreen = renderOutsideScreen;
+            _flatSubtitleAttachToVideoSurface = attachToVideoSurface;
             _hasFlatSubtitleLayerGeometry = true;
 
-            SubtitleLayerGeometry geometry = CalculateSubtitleLayerGeometry(contentWidth, contentHeight, renderOutsideScreen);
+            SubtitleLayerGeometry geometry = CalculateSubtitleLayerGeometry(
+                contentWidth,
+                contentHeight,
+                renderOutsideScreen,
+                attachToVideoSurface);
             _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.SizeMeters);
             _flatSubtitleOverlaySurface.RebuildLayer(surfaceWidth, surfaceHeight, _currentStereo);
             Debug.Log(
@@ -903,6 +916,7 @@ namespace XRVLC
             _flatSubtitleContentWidth = 0;
             _flatSubtitleContentHeight = 0;
             _flatSubtitleRenderOutsideScreen = false;
+            _flatSubtitleAttachToVideoSurface = false;
             _hasFlatSubtitleLayerGeometry = false;
             Destroy(layerObject);
         }
@@ -915,15 +929,28 @@ namespace XRVLC
             SubtitleLayerGeometry geometry = CalculateSubtitleLayerGeometry(
                 _flatSubtitleContentWidth,
                 _flatSubtitleContentHeight,
-                _flatSubtitleRenderOutsideScreen);
+                _flatSubtitleRenderOutsideScreen,
+                _flatSubtitleAttachToVideoSurface);
             _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.SizeMeters);
         }
 
-        private SubtitleLayerGeometry CalculateSubtitleLayerGeometry(uint contentWidth, uint contentHeight, bool renderOutsideScreen)
+        private SubtitleLayerGeometry CalculateSubtitleLayerGeometry(
+            uint contentWidth,
+            uint contentHeight,
+            bool renderOutsideScreen,
+            bool attachToVideoSurface)
         {
             Quaternion rotation = videoAnchor.rotation;
             Vector3 center;
             Vector2 size;
+
+            if (attachToVideoSurface && _currentProjection == VideoProjection.Flat)
+            {
+                return new SubtitleLayerGeometry(
+                    videoAnchor.position,
+                    rotation,
+                    SubtitleReferenceSizeMeters);
+            }
 
             if (IsImmersiveProjection)
             {

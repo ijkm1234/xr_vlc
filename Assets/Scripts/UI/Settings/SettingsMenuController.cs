@@ -935,7 +935,7 @@ public class SettingsMenuController : MonoBehaviour
     {
         if (_playbackService == null)
             _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
-        if (_playbackService == null)
+        if (_playbackService == null || _playbackService.SubtitleRenderMode != SubtitleRenderMode.Spatial)
             return;
 
         _playbackService.SetRenderSubtitlesOutsideScreen(!_playbackService.RenderSubtitlesOutsideScreen);
@@ -1055,6 +1055,7 @@ public class SettingsMenuController : MonoBehaviour
         bool spatial = mode == SubtitleRenderMode.Spatial;
         SetSwitchButtonState(_spatialSubtitleSwitchButton, spatial);
         SetSwitchButtonState(_outsideSubtitleSwitchButton, _playbackService != null && _playbackService.RenderSubtitlesOutsideScreen);
+        SetDependentSwitchRowVisible(_outsideSubtitleSwitchButton, spatial);
 
         if (_subtitleDelayStepper != null)
             _subtitleDelayStepper.SetValueWithoutNotify(FormatSignedSeconds(_playbackService != null ? _playbackService.SubtitleDelaySeconds : 0f));
@@ -1084,6 +1085,16 @@ public class SettingsMenuController : MonoBehaviour
 
         SettingsStyleSwitch switchVisual = button.GetComponentInChildren<SettingsStyleSwitch>(true);
         switchVisual?.SetState(enabled);
+    }
+
+    private static void SetDependentSwitchRowVisible(Button button, bool visible)
+    {
+        if (button == null)
+            return;
+
+        button.interactable = visible;
+        if (button.transform.parent != null)
+            button.transform.parent.gameObject.SetActive(visible);
     }
 
     private void UpdateVideoLayoutSelection()

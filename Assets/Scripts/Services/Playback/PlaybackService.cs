@@ -18,6 +18,7 @@ namespace XRVLC.Media
         private const float ShortcutFastRate = 2f;
         private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
         private const float SurfaceRebuildPauseTimeoutSeconds = 1.5f;
+        private const int CodecBufferAlignmentPixels = 16;
 
         public static PlaybackService Instance { get; private set; }
 
@@ -383,6 +384,7 @@ namespace XRVLC.Media
                 return;
             }
 
+            videoSize = NormalizeCodecAlignedPadding(videoSize);
             VlcVideoSize previousSize = CurrentVideoSize;
             VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
             VideoLayerSpec nextVideoSpec = CreateVideoLayerSpec(videoSize, nextGeometry);
@@ -1600,7 +1602,8 @@ namespace XRVLC.Media
                     subtitleSpec.SurfaceHeight,
                     subtitleSpec.ContentWidth,
                     subtitleSpec.ContentHeight,
-                    subtitleSpec.RenderOutsideScreen))
+                    subtitleSpec.RenderOutsideScreen,
+                    subtitleSpec.RenderMode == SubtitleRenderMode.Native))
             {
                 Debug.LogError(
                     $"[PlaybackService] Flat subtitle layer rebuild failed: mode={SubtitleRenderMode}, " +
@@ -1650,6 +1653,7 @@ namespace XRVLC.Media
             uint contentWidth = (uint)CurrentVideoSize.ContentWidth;
             uint contentHeight = (uint)CurrentVideoSize.ContentHeight;
             uint surfaceWidth = contentWidth;
+            bool renderOutsideScreen = ShouldRenderSubtitlesOutsideScreen();
             uint surfaceHeight = UsesSingleHeightSubtitleSurface()
                 ? contentHeight
                 : contentHeight * 2u;
@@ -1660,7 +1664,7 @@ namespace XRVLC.Media
                 contentWidth,
                 contentHeight,
                 CurrentGeometrySelection.Stereo,
-                RenderSubtitlesOutsideScreen,
+                renderOutsideScreen,
                 ShouldStackSubtitlesOutside(),
                 SubtitleRenderMode);
             return true;
@@ -1715,6 +1719,40 @@ namespace XRVLC.Media
                 && a.ContentHeight == b.ContentHeight;
         }
 
+        private VlcVideoSize NormalizeCodecAlignedPadding(VlcVideoSize reportedSize)
+        {
+            if (!_videoSurfaceBoundToVlc || !_boundInputLayerSpec.HasValue)
+                return reportedSize;
+
+            InputLayerSpec boundInput = _boundInputLayerSpec.Value;
+            int trustedWidth = (int)boundInput.ContentWidth;
+            int trustedHeight = (int)boundInput.ContentHeight;
+            bool reportedVisibleEqualsRaw = reportedSize.VisibleWidth == reportedSize.Width
+                && reportedSize.VisibleHeight == reportedSize.Height;
+            bool matchesAlignedBuffer = reportedSize.Width == AlignUp(trustedWidth, CodecBufferAlignmentPixels)
+                && reportedSize.Height == AlignUp(trustedHeight, CodecBufferAlignmentPixels);
+            bool differsFromTrustedContent = reportedSize.ContentWidth != trustedWidth
+                || reportedSize.ContentHeight != trustedHeight;
+
+            if (!reportedVisibleEqualsRaw || !matchesAlignedBuffer || !differsFromTrustedContent)
+                return reportedSize;
+
+            SurfaceDebug(
+                $"layout_callback normalized codec_padding raw={reportedSize.Width}x{reportedSize.Height} " +
+                $"reportedVisible={reportedSize.VisibleWidth}x{reportedSize.VisibleHeight} " +
+                $"trustedVisible={trustedWidth}x{trustedHeight} alignment={CodecBufferAlignmentPixels}");
+            return new VlcVideoSize(
+                reportedSize.Width,
+                reportedSize.Height,
+                trustedWidth,
+                trustedHeight);
+        }
+
+        private static int AlignUp(int value, int alignment)
+        {
+            return (value + alignment - 1) / alignment * alignment;
+        }
+
         private static bool HasSameGeometry(VideoGeometrySelection a, VideoGeometrySelection b)
         {
             return a.Projection == b.Projection
@@ -1725,21 +1763,33 @@ namespace XRVLC.Media
 
         private static bool UsesFlatSubtitleSurfaceMode(SubtitleRenderMode mode)
         {
-            return mode == SubtitleRenderMode.Spatial;
+            return mode == SubtitleRenderMode.Native
+                || mode == SubtitleRenderMode.Spatial
+                || mode == SubtitleRenderMode.DualDebug;
         }
 
         private bool UsesSingleHeightSubtitleSurface()
         {
             return (CurrentGeometrySelection.Projection == VideoProjection.Flat
                     || CurrentGeometrySelection.Projection == VideoProjection.Cylinder)
-                && !RenderSubtitlesOutsideScreen;
+                && !ShouldRenderSubtitlesOutsideScreen();
+        }
+
+        private bool ShouldRenderSubtitlesOutsideScreen()
+        {
+            return SubtitleRenderMode == SubtitleRenderMode.Spatial
+                && RenderSubtitlesOutsideScreen;
         }
 
         private bool ShouldStackSubtitlesOutside()
         {
+            if (SubtitleRenderMode != SubtitleRenderMode.Spatial
+                && SubtitleRenderMode != SubtitleRenderMode.DualDebug)
+                return false;
+
             if (IsImmersiveProjection(CurrentGeometrySelection.Projection))
                 return true;
-            return RenderSubtitlesOutsideScreen;
+            return ShouldRenderSubtitlesOutsideScreen();
         }
 
         private static bool IsImmersiveProjection(VideoProjection projection)

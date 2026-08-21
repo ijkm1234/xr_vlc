@@ -1111,7 +1111,15 @@ public class VlcPlaybackBridge : MonoBehaviour
 
     private static SubtitleRenderMode ToAndroidSubtitleRenderMode(SubtitleRenderMode mode)
     {
-        return mode;
+        // Android mode 1 selects VLC's separate XR subtitle Surface. Unity owns
+        // whether that Surface is aligned to the screen or placed spatially.
+        return mode switch
+        {
+            SubtitleRenderMode.Native => SubtitleRenderMode.Spatial,
+            SubtitleRenderMode.Spatial => SubtitleRenderMode.Spatial,
+            SubtitleRenderMode.DualDebug => SubtitleRenderMode.Spatial,
+            _ => SubtitleRenderMode.Off
+        };
     }
 
     public static void SetVideoScaleOrdinal(int scaleOrdinal)
