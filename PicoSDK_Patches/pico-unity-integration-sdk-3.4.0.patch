@@ -1,0 +1,73 @@
+diff --git a/Runtime/Scripts/Features/PXR_CompositionLayer.cs b/Runtime/Scripts/Features/PXR_CompositionLayer.cs
+--- a/Runtime/Scripts/Features/PXR_CompositionLayer.cs
++++ b/Runtime/Scripts/Features/PXR_CompositionLayer.cs
+@@ -225,7 +225,7 @@ namespace Unity.XR.PXR
+             overlayEyeCamera[1] = rightCamera;
+         }
+ 
+-        private void InitializeBuffer()
++        public void InitializeBuffer()
+         {
+             if (!isExternalAndroidSurface && !isClones)
+             {
+@@ -247,8 +247,21 @@ namespace Unity.XR.PXR
+             }
+             else
+             {
+-                overlayParam.width = 1024;
+-                overlayParam.height = 1024;
++                if (layerTextures[0] != null)
++                {
++                    overlayParam.width = (uint)layerTextures[0].width;
++                    overlayParam.height = (uint)layerTextures[0].height;
++                }
++                else if (layerTextures[1] != null)
++                {
++                    overlayParam.width = (uint)layerTextures[1].width;
++                    overlayParam.height = (uint)layerTextures[1].height;
++                }
++                else
++                {
++                    overlayParam.width = 1024;
++                    overlayParam.height = 1024;
++                }
+             }
+ 
+             overlayID++;
+@@ -376,6 +389,9 @@ namespace Unity.XR.PXR
+                 return;
+             }
+ 
++            // Create the layer with the computed dimensions before requesting the Android Surface.
++            PXR_Plugin.Render.UPxr_CreateLayerParam(overlayInstance.overlayParam);
++
+             PXR_Plugin.Render.UPxr_GetLayerAndroidSurface(overlayInstance.overlayIndex, 0, ref overlayInstance.externalAndroidSurfaceObject);
+             PLog.i(TAG, string.Format("CreateExternalSurface: Overlay Type:{0}, LayerDepth:{1}, SurfaceObject:{2}", overlayInstance.overlayType, overlayInstance.overlayIndex, overlayInstance.externalAndroidSurfaceObject));
+             
+diff --git a/Runtime/Scripts/Features/PXR_OverLay.cs b/Runtime/Scripts/Features/PXR_OverLay.cs
+--- a/Runtime/Scripts/Features/PXR_OverLay.cs
++++ b/Runtime/Scripts/Features/PXR_OverLay.cs
+@@ -246,8 +246,21 @@ namespace Unity.XR.PXR
+             }
+             else
+             {
+-                overlayParam.width = 1024;
+-                overlayParam.height = 1024;
++                if (layerTextures[0] != null)
++                {
++                    overlayParam.width = (uint)layerTextures[0].width;
++                    overlayParam.height = (uint)layerTextures[0].height;
++                }
++                else if (layerTextures[1] != null)
++                {
++                    overlayParam.width = (uint)layerTextures[1].width;
++                    overlayParam.height = (uint)layerTextures[1].height;
++                }
++                else
++                {
++                    overlayParam.width = 1024;
++                    overlayParam.height = 1024;
++                }
+             }
+ 
+             PXR_CompositionLayer.overlayID++;

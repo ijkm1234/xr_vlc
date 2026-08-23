@@ -1,0 +1,26 @@
+{
+    "name": "XRVLC.Tests.Editor",
+    "rootNamespace": "XRVLC.Tests",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Unity.TextMeshPro",
+        "XRVLC.Shared",
+        "XRVLC.VlcBridge.Parsing",
+        "XRVLC.SubtitleRendering",
+        "XRVLC.UI.XR"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
