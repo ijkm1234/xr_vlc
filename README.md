@@ -23,7 +23,7 @@ VLC/libVLC 媒体栈。
 | --- | --- |
 | VLC for Android fork | tag `v0.0.1` (`d7d8dc62bff041c78bf93dfa601edd3b1f97a83a`) |
 | libvlcjni fork | tag `v0.0.1` (`2d96eac4d95e16c3da1dffa109848e7605ca1cf9`) |
-| VLC/libVLC fork | tag `v0.0.1` (`7381a31a75b018ced4757448f22979636c9c9dd2`) |
+| VLC/libVLC fork | tag `v0.0.1` (`d65ec2d64eb9d298cfe630ab915369ad0b253503`) |
 
 顶层脚本通过公开 HTTPS 仓库解析并校验 VLC for Android 的标签和提交；
 该仓库的构建脚本再以相同方式校验 libvlcjni 与 VLC/libVLC。
