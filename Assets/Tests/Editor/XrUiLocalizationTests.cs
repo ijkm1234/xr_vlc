@@ -57,6 +57,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("XrUiText.Get(XrUiTextKey.GeometryProjection)", vr);
             StringAssert.Contains("CreateTabButton(tabBar, SettingsTab.Playback, XrUiText.Get(XrUiTextKey.SettingsTabPlayback))", settings);
             StringAssert.Contains("XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle)", shortcut);
+            StringAssert.Contains("XrUiText.ForShortcutAction(ShortcutActions.TogglePassthroughBackground)", shortcut);
             StringAssert.Contains("playlistDropdown.SetPlaceholder(XrUiText.Get(XrUiTextKey.PlaylistEmpty))", playlist);
             StringAssert.Contains("XrUiText.Get(XrUiTextKey.UnknownVideo)", parser);
 

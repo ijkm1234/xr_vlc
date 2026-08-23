@@ -107,8 +107,10 @@ namespace XRVLC.Tests
         {
             string videoScreenPath = Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreen.cs");
             string uiManagerPath = Path.Combine(Application.dataPath, "Scripts/UI/PlaybackControls/VRUIManager.cs");
+            string playbackServicePath = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string videoScreenSource = File.ReadAllText(videoScreenPath);
             string uiManagerSource = File.ReadAllText(uiManagerPath);
+            string playbackServiceSource = File.ReadAllText(playbackServicePath);
             string updateBackground = ExtractMethod(videoScreenSource, "UpdateFlatUnderlayBackground", "private void");
             string passthroughStateChanged = ExtractMethod(uiManagerSource, "OnPassthroughStateChanged", "private void");
 
@@ -116,6 +118,10 @@ namespace XRVLC.Tests
             StringAssert.Contains("_passthroughBackgroundEnabled", updateBackground);
             StringAssert.Contains("new Color(0f, 0f, 0f, 0f)", updateBackground);
             StringAssert.Contains("ApplyPassthroughBackground(enabled)", passthroughStateChanged);
+            StringAssert.Contains("playbackService.TogglePassthroughBackground()", uiManagerSource);
+            StringAssert.Contains("public void TogglePassthroughBackground()", playbackServiceSource);
+            StringAssert.Contains("passthroughService.Toggle()", playbackServiceSource);
+            StringAssert.Contains("videoScreen?.SetPassthroughBackgroundEnabled(", playbackServiceSource);
         }
 
         [Test]

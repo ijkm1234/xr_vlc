@@ -107,6 +107,7 @@ public class ShortcutConfigPanel : MonoBehaviour
             new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.None)),
             new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.Toggle2xSpeed)),
             new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle)),
+            new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.TogglePassthroughBackground)),
             new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ResetScreenTransform))
         });
         dropdown.onValueChanged.RemoveListener(OnShortcutDropdownChanged);

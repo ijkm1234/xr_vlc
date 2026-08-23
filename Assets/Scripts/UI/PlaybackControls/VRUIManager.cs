@@ -1466,7 +1466,13 @@ public class VRUIManager : MonoBehaviour
     {
         CloseSecondaryPopups();
         EnsurePassthroughModeService();
-        passthroughModeService?.Toggle();
+        if (playbackService == null)
+            playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        if (playbackService != null)
+            playbackService.TogglePassthroughBackground();
+        else
+            passthroughModeService?.Toggle();
         UpdateSeeThroughButtonPassthroughVisual();
     }
 

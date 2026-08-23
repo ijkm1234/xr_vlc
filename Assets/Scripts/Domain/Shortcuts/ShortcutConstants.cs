@@ -21,6 +21,7 @@ namespace XRVLC
         public const string None = "none";
         public const string Toggle2xSpeed = "toggle_2x_speed";
         public const string ToggleSubtitle = "toggle_subtitle";
+        public const string TogglePassthroughBackground = "toggle_passthrough_background";
         public const string ResetScreenTransform = "reset_screen_transform";
 
         public static readonly string[] All =
@@ -28,6 +29,7 @@ namespace XRVLC
             None,
             Toggle2xSpeed,
             ToggleSubtitle,
+            TogglePassthroughBackground,
             ResetScreenTransform
         };
 

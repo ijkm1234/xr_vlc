@@ -75,6 +75,9 @@ namespace XRVLC.Services.Shortcuts
                 case ShortcutActions.ToggleSubtitle:
                     _playbackService.ToggleSubtitleTrack();
                     break;
+                case ShortcutActions.TogglePassthroughBackground:
+                    _playbackService.TogglePassthroughBackground();
+                    break;
                 case ShortcutActions.ResetScreenTransform:
                     _playbackService.ResetVideoScreenTransform();
                     break;

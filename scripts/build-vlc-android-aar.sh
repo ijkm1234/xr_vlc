@@ -7,8 +7,8 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workspace_root="$(cd "$project_root/.." && pwd)"
 vlc_root="$workspace_root/vlc-android"
 vlc_repository="${VLC_ANDROID_REPOSITORY:-https://github.com/ijkm1234/vlc_android_for_xr_vlc.git}"
-vlc_branch="${VLC_ANDROID_BRANCH:-init}"
-vlc_revision="${VLC_ANDROID_REVISION:-6d460328c51731dd5be322832db5cdf780cd1ed1}"
+vlc_version="${VLC_ANDROID_VERSION:-v0.0.1}"
+vlc_tested_hash="${VLC_ANDROID_TESTED_HASH:-3132974519b66eac6f1547d41038a57e0f73dc7b}"
 vlc_use_local="${VLC_ANDROID_USE_LOCAL:-0}"
 vlc_build_script="$vlc_root/buildsystem/build-xr-aar.sh"
 local_properties="$vlc_root/local.properties"
@@ -37,26 +37,31 @@ if [[ ! -e "$vlc_root/.git" ]]; then
     if [[ -e "$vlc_root" ]]; then
         fail "$vlc_root exists but is not a Git checkout; move it aside before bootstrapping."
     fi
-    echo "VLC Android sources not found; cloning $vlc_branch from $vlc_repository"
-    git clone --filter=blob:none --single-branch --branch "$vlc_branch" \
+    echo "VLC Android sources not found; cloning release tag $vlc_version from $vlc_repository"
+    git clone --filter=blob:none --single-branch --branch "$vlc_version" \
         "$vlc_repository" "$vlc_root"
-    if ! git -C "$vlc_root" cat-file -e "${vlc_revision}^{commit}" 2>/dev/null; then
-        git -C "$vlc_root" fetch --depth 1 origin "$vlc_revision"
-    fi
-    git -C "$vlc_root" checkout --detach "$vlc_revision"
+    git -C "$vlc_root" checkout --detach "${vlc_version}^{commit}"
 else
     echo "Using existing VLC Android checkout at $vlc_root (no automatic pull or reset)"
 fi
 
 if [[ "$vlc_use_local" != "1" ]]; then
+    if ! git -C "$vlc_root" cat-file -e "${vlc_version}^{commit}" 2>/dev/null; then
+        git -C "$vlc_root" fetch "$vlc_repository" \
+            "refs/tags/${vlc_version}:refs/tags/${vlc_version}"
+    fi
+    resolved_vlc_tag_hash="$(git -C "$vlc_root" rev-parse "${vlc_version}^{commit}")"
+    if [[ "$resolved_vlc_tag_hash" != "$vlc_tested_hash" ]]; then
+        fail "VLC Android release tag $vlc_version resolves to $resolved_vlc_tag_hash; expected $vlc_tested_hash."
+    fi
     resolved_vlc_revision="$(git -C "$vlc_root" rev-parse HEAD)"
-    if [[ "$resolved_vlc_revision" != "$vlc_revision" ]]; then
-        fail "VLC Android checkout is at $resolved_vlc_revision; expected $vlc_revision. Update the sibling checkout, or set VLC_ANDROID_USE_LOCAL=1 to build local development sources."
+    if [[ "$resolved_vlc_revision" != "$resolved_vlc_tag_hash" ]]; then
+        fail "VLC Android checkout is at $resolved_vlc_revision; expected release tag $vlc_version ($resolved_vlc_tag_hash). Update the sibling checkout, or set VLC_ANDROID_USE_LOCAL=1 to build local development sources."
     fi
     if ! git -C "$vlc_root" diff --quiet || ! git -C "$vlc_root" diff --cached --quiet; then
         fail "VLC Android checkout contains tracked local changes. Commit them, or set VLC_ANDROID_USE_LOCAL=1 to build local development sources."
     fi
-    echo "Verified VLC Android revision $vlc_revision"
+    echo "Verified VLC Android release tag $vlc_version ($resolved_vlc_tag_hash)"
 else
     echo "VLC_ANDROID_USE_LOCAL=1: building the current local VLC Android checkout"
 fi

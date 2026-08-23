@@ -49,6 +49,7 @@ namespace XRVLC.Localization
         public const string ShortcutNone = "shortcut.action.none";
         public const string ShortcutToggle2xSpeed = "shortcut.action.toggle_2x_speed";
         public const string ShortcutToggleSubtitle = "shortcut.action.toggle_subtitle";
+        public const string ShortcutTogglePassthroughBackground = "shortcut.action.toggle_passthrough_background";
         public const string ShortcutResetScreen = "shortcut.action.reset_screen";
 
         public const string GeometryProjection = "geometry.section.projection";
@@ -135,6 +136,7 @@ namespace XRVLC.Localization
             [XrUiTextKey.ShortcutNone] = "None",
             [XrUiTextKey.ShortcutToggle2xSpeed] = "Toggle 2x speed",
             [XrUiTextKey.ShortcutToggleSubtitle] = "Toggle subtitles",
+            [XrUiTextKey.ShortcutTogglePassthroughBackground] = "Passthrough background",
             [XrUiTextKey.ShortcutResetScreen] = "Reset screen",
 
             [XrUiTextKey.GeometryProjection] = "Projection",
@@ -213,7 +215,8 @@ namespace XRVLC.Localization
 
             [XrUiTextKey.ShortcutNone] = "无操作",
             [XrUiTextKey.ShortcutToggle2xSpeed] = "切换 2x 速度",
-            [XrUiTextKey.ShortcutToggleSubtitle] = "切换字幕",
+            [XrUiTextKey.ShortcutToggleSubtitle] = "字幕显隐",
+            [XrUiTextKey.ShortcutTogglePassthroughBackground] = "透视背景",
             [XrUiTextKey.ShortcutResetScreen] = "恢复屏幕默认位置",
 
             [XrUiTextKey.GeometryProjection] = "投影模式",
@@ -264,6 +267,7 @@ namespace XRVLC.Localization
             {
                 XRVLC.ShortcutActions.Toggle2xSpeed => Get(XrUiTextKey.ShortcutToggle2xSpeed),
                 XRVLC.ShortcutActions.ToggleSubtitle => Get(XrUiTextKey.ShortcutToggleSubtitle),
+                XRVLC.ShortcutActions.TogglePassthroughBackground => Get(XrUiTextKey.ShortcutTogglePassthroughBackground),
                 XRVLC.ShortcutActions.ResetScreenTransform => Get(XrUiTextKey.ShortcutResetScreen),
                 _ => Get(XrUiTextKey.ShortcutNone)
             };

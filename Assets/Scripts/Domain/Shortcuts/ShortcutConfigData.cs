@@ -18,8 +18,8 @@ namespace XRVLC
             var data = new ShortcutConfigData();
             data.SetAction(ShortcutButtons.RightStickClick, ShortcutActions.ResetScreenTransform);
             data.SetAction(ShortcutButtons.LeftStickClick, ShortcutActions.ResetScreenTransform);
-            data.SetAction(ShortcutButtons.ButtonB, ShortcutActions.ToggleSubtitle);
-            data.SetAction(ShortcutButtons.ButtonY, ShortcutActions.ToggleSubtitle);
+            data.SetAction(ShortcutButtons.ButtonB, ShortcutActions.TogglePassthroughBackground);
+            data.SetAction(ShortcutButtons.ButtonY, ShortcutActions.TogglePassthroughBackground);
             return data;
         }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using XRVLC.Infrastructure.Pico;
 using XRVLC.Media;
 using XRVLC.Services.Settings;
 
@@ -1269,6 +1270,22 @@ namespace XRVLC.Media
         public void ResetVideoScreenTransform()
         {
             videoScreen?.ResetTransformToDefault();
+        }
+
+        /// <summary>
+        /// 切换 PICO 背景透视，并同步视频幕布的透明背景状态。
+        /// 控制栏按钮与 XR 快捷键共用此入口，避免两条路径行为不一致。
+        /// </summary>
+        public void TogglePassthroughBackground()
+        {
+            PicoPassthroughModeService passthroughService =
+                FindAnyObjectByType<PicoPassthroughModeService>();
+            if (passthroughService == null)
+                passthroughService = gameObject.AddComponent<PicoPassthroughModeService>();
+
+            passthroughService.Toggle();
+            videoScreen?.SetPassthroughBackgroundEnabled(
+                passthroughService.IsSupported && passthroughService.IsEnabled);
         }
 
         public void SetVideoScaleMode(VideoScaleMode mode)

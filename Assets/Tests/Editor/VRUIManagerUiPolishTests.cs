@@ -208,6 +208,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.None))", settings);
             StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.Toggle2xSpeed))", settings);
             StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.ToggleSubtitle))", settings);
+            StringAssert.Contains("new XrDropdownItemData(XrUiText.ForShortcutAction(ShortcutActions.TogglePassthroughBackground))", settings);
             StringAssert.Contains("Instantiate(shortcutDropdownPrefab, row, false)", settings);
             StringAssert.Contains("Debug.LogError(\"[SettingsMenuController] shortcutDropdownPrefab is not assigned.", settings);
             StringAssert.DoesNotContain("CreateFallbackShortcutDropdown", settings);

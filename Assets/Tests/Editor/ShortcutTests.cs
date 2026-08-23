@@ -51,8 +51,8 @@ namespace XRVLC.Tests
 
             Assert.AreEqual(ShortcutActions.ResetScreenTransform, config.GetAction(ShortcutButtons.RightStickClick));
             Assert.AreEqual(ShortcutActions.ResetScreenTransform, config.GetAction(ShortcutButtons.LeftStickClick));
-            Assert.AreEqual(ShortcutActions.ToggleSubtitle, config.GetAction(ShortcutButtons.ButtonB));
-            Assert.AreEqual(ShortcutActions.ToggleSubtitle, config.GetAction(ShortcutButtons.ButtonY));
+            Assert.AreEqual(ShortcutActions.TogglePassthroughBackground, config.GetAction(ShortcutButtons.ButtonB));
+            Assert.AreEqual(ShortcutActions.TogglePassthroughBackground, config.GetAction(ShortcutButtons.ButtonY));
         }
 
         [Test]
@@ -69,11 +69,13 @@ namespace XRVLC.Tests
         {
             var config = new ShortcutConfigData();
             config.SetAction(ShortcutButtons.RightStickClick, ShortcutActions.ToggleSubtitle);
+            config.SetAction(ShortcutButtons.ButtonB, ShortcutActions.TogglePassthroughBackground);
             config.SetAction(ShortcutButtons.ButtonY, ShortcutActions.None);
 
             var roundTrip = ShortcutConfigData.FromJson(config.ToJson());
 
             Assert.AreEqual(ShortcutActions.ToggleSubtitle, roundTrip.GetAction(ShortcutButtons.RightStickClick));
+            Assert.AreEqual(ShortcutActions.TogglePassthroughBackground, roundTrip.GetAction(ShortcutButtons.ButtonB));
             Assert.AreEqual(ShortcutActions.None, roundTrip.GetAction(ShortcutButtons.ButtonY));
         }
 

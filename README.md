@@ -21,12 +21,12 @@ VLC/libVLC 媒体栈。
 
 | Dependency | Pinned version |
 | --- | --- |
-| VLC for Android fork | `b7789d2ebf977187eca01257e092c678ceecf5d9` |
+| VLC for Android fork | tag `v0.0.1` (`3132974519b66eac6f1547d41038a57e0f73dc7b`) |
 | libvlcjni fork | tag `v0.0.1` (`2d96eac4d95e16c3da1dffa109848e7605ca1cf9`) |
 | VLC/libVLC fork | tag `v0.0.1` (`7381a31a75b018ced4757448f22979636c9c9dd2`) |
 
-顶层脚本固定 VLC for Android 提交；该仓库的构建脚本再通过公开 HTTPS
-仓库解析并校验 libvlcjni 与 VLC/libVLC 的标签和提交。
+顶层脚本通过公开 HTTPS 仓库解析并校验 VLC for Android 的标签和提交；
+该仓库的构建脚本再以相同方式校验 libvlcjni 与 VLC/libVLC。
 
 ## Build and setup
 
@@ -60,7 +60,7 @@ VLC_ANDROID_AAR_VARIANT=release ./scripts/build-vlc-android-aar.sh
 ```
 
 若同级目录中不存在 `vlc-android`，脚本会从公开 HTTPS 仓库克隆并切换到
-固定提交；如果目录已存在，脚本不会自动 pull 或 reset，而会校验提交和
+固定标签；如果目录已存在，脚本不会自动 pull 或 reset，而会校验标签、提交和
 tracked 文件状态。只有明确需要编译本地开发源码时才使用：
 
 ```bash
