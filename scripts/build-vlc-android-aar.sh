@@ -8,7 +8,7 @@ workspace_root="$(cd "$project_root/.." && pwd)"
 vlc_root="$workspace_root/vlc-android"
 vlc_repository="${VLC_ANDROID_REPOSITORY:-https://github.com/ijkm1234/vlc_android_for_xr_vlc.git}"
 vlc_version="${VLC_ANDROID_VERSION:-v0.0.1}"
-vlc_tested_hash="${VLC_ANDROID_TESTED_HASH:-3132974519b66eac6f1547d41038a57e0f73dc7b}"
+vlc_tested_hash="${VLC_ANDROID_TESTED_HASH:-d7d8dc62bff041c78bf93dfa601edd3b1f97a83a}"
 vlc_use_local="${VLC_ANDROID_USE_LOCAL:-0}"
 vlc_build_script="$vlc_root/buildsystem/build-xr-aar.sh"
 local_properties="$vlc_root/local.properties"
@@ -46,11 +46,12 @@ else
 fi
 
 if [[ "$vlc_use_local" != "1" ]]; then
-    if ! git -C "$vlc_root" cat-file -e "${vlc_version}^{commit}" 2>/dev/null; then
-        git -C "$vlc_root" fetch "$vlc_repository" \
-            "refs/tags/${vlc_version}:refs/tags/${vlc_version}"
+    resolved_vlc_tag_hash="$(git -C "$vlc_root" rev-parse "${vlc_version}^{commit}" 2>/dev/null || true)"
+    if [[ "$resolved_vlc_tag_hash" != "$vlc_tested_hash" ]]; then
+        git -C "$vlc_root" fetch --force "$vlc_repository" \
+            "+refs/tags/${vlc_version}:refs/tags/${vlc_version}"
+        resolved_vlc_tag_hash="$(git -C "$vlc_root" rev-parse "${vlc_version}^{commit}")"
     fi
-    resolved_vlc_tag_hash="$(git -C "$vlc_root" rev-parse "${vlc_version}^{commit}")"
     if [[ "$resolved_vlc_tag_hash" != "$vlc_tested_hash" ]]; then
         fail "VLC Android release tag $vlc_version resolves to $resolved_vlc_tag_hash; expected $vlc_tested_hash."
     fi
@@ -102,7 +103,13 @@ fi
 
 aar_source="$vlc_root/application/vlc-android/build/outputs/aar/vlc-android-$aar_variant.aar"
 aar_target="$project_root/Assets/Plugins/Android/vlc-android-$aar_variant.aar"
+if [[ "$aar_variant" == "debug" ]]; then
+    other_aar_target="$project_root/Assets/Plugins/Android/vlc-android-release.aar"
+else
+    other_aar_target="$project_root/Assets/Plugins/Android/vlc-android-debug.aar"
+fi
 
+rm -f "$other_aar_target" "$other_aar_target.meta"
 cp "$aar_source" "$aar_target"
 cmp -s "$aar_source" "$aar_target"
 echo "Built and installed $aar_target"

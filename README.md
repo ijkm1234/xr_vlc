@@ -21,7 +21,7 @@ VLC/libVLC 媒体栈。
 
 | Dependency | Pinned version |
 | --- | --- |
-| VLC for Android fork | tag `v0.0.1` (`3132974519b66eac6f1547d41038a57e0f73dc7b`) |
+| VLC for Android fork | tag `v0.0.1` (`d7d8dc62bff041c78bf93dfa601edd3b1f97a83a`) |
 | libvlcjni fork | tag `v0.0.1` (`2d96eac4d95e16c3da1dffa109848e7605ca1cf9`) |
 | VLC/libVLC fork | tag `v0.0.1` (`7381a31a75b018ced4757448f22979636c9c9dd2`) |
 
@@ -58,6 +58,26 @@ package 所需的项目内相对链接。PICO SDK 源码和本地链接均不提
 ```bash
 VLC_ANDROID_AAR_VARIANT=release ./scripts/build-vlc-android-aar.sh
 ```
+
+命令行构建正式签名 APK 或 AAB 时，通过环境变量提供本地 JKS 信息：
+
+```bash
+export XRVLC_KEYSTORE_PATH="/absolute/path/to/xrvlc-release.jks"
+export XRVLC_KEYSTORE_PASS="<keystore-password>"
+export XRVLC_KEY_ALIAS="xrvlc-release"
+export XRVLC_KEY_ALIAS_PASS="<alias-password>"
+
+Unity \
+  -batchmode -quit \
+  -projectPath . \
+  -executeMethod CommandLineAndroidBuild.BuildRelease \
+  -outputPath Builds/xr_vlc-release.apk \
+  -logFile -
+```
+
+执行前确保项目所需版本的 `Unity` 命令已加入 `PATH`。
+将输出扩展名改为 `.aab` 即构建 Android App Bundle。正式构建要求插件目录中
+只存在 `vlc-android-release.aar`；AAR 构建脚本会自动移除另一 variant。
 
 若同级目录中不存在 `vlc-android`，脚本会从公开 HTTPS 仓库克隆并切换到
 固定标签；如果目录已存在，脚本不会自动 pull 或 reset，而会校验标签、提交和
