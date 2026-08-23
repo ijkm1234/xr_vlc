@@ -91,6 +91,8 @@ namespace XRVLC
             _compLayer.layerDepth = 0;
             _compLayer.useTextureAlphaBlending = useTextureAlphaBlending;
             _compLayer.usePremultipliedAlpha = false;
+            _compLayer.normalSupersampling = false;
+            _compLayer.qualitySupersampling = true;
 
             Debug.Log($"[PicoRenderSurface] RebuildLayer — proj={proj}, isImmersive={isImmersive}, overlayType={_compLayer.overlayType}, shape={_compLayer.overlayShape}");
             SurfaceDebug(
