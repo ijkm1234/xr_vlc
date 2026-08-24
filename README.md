@@ -69,6 +69,7 @@ export XRVLC_KEY_ALIAS_PASS="<alias-password>"
 
 Unity \
   -batchmode -quit \
+  -buildTarget Android \
   -projectPath . \
   -executeMethod CommandLineAndroidBuild.BuildRelease \
   -outputPath Builds/xr_vlc-release.apk \
@@ -76,6 +77,9 @@ Unity \
 ```
 
 执行前确保项目所需版本的 `Unity` 命令已加入 `PATH`。
+`-buildTarget Android` 必须在 Unity 启动时传入，尤其是清空 `Library` 后；否则
+PICO 的 Android Manifest 后处理可能不会参与本次构建，导致 APK 缺少 PICO SDK
+元数据并在启动时无法创建 Composition Layer。
 将输出扩展名改为 `.aab` 即构建 Android App Bundle。正式构建要求插件目录中
 只存在 `vlc-android-release.aar`；AAR 构建脚本会自动移除另一 variant。
 
