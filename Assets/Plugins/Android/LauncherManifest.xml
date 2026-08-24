@@ -18,6 +18,10 @@
         android:logo="@drawable/pico_panel_icon">
 
         <meta-data
+            android:name="pvr.app.type"
+            android:value="vr" />
+
+        <meta-data
             android:name="pvr.app.splash"
             android:value="0"
             tools:replace="android:value" />

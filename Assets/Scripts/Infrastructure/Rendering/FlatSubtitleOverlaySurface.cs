@@ -84,8 +84,8 @@ namespace XRVLC
             _compLayer.layerDepth = 1;
             _compLayer.useTextureAlphaBlending = true;
             _compLayer.usePremultipliedAlpha = false;
-            _compLayer.normalSupersampling = false;
-            _compLayer.qualitySupersampling = true;
+            _compLayer.normalSupersampling = true;
+            _compLayer.qualitySupersampling = false;
             _compLayer.externalAndroidSurface3DType = stereo switch
             {
                 StereoMode.LeftRight => PXR_CompositionLayer.Surface3DType.LeftRight,

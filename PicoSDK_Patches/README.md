@@ -23,4 +23,4 @@ The script:
 3. applies `pico-unity-integration-sdk-3.4.0.patch` idempotently;
 4. points Unity's stable local package link at the environment-controlled working copy.
 
-The patch exposes `InitializeBuffer()`, preserves the real ExternalSurface dimensions, forces layer creation before requesting the Android Surface, and keeps the legacy overlay dimension behavior. If the upstream revision changes, update and revalidate the patch before changing the pinned revision.
+The patch exposes `InitializeBuffer()`, preserves the real ExternalSurface dimensions, and keeps the legacy overlay dimension behavior. Layer creation remains centralized in `InitializeBuffer()` so `CreateExternalSurface()` only requests the Android Surface for the existing layer. If the upstream revision changes, update and revalidate the patch before changing the pinned revision.
