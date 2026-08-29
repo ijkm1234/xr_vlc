@@ -14,6 +14,8 @@ public class VlcPlaybackBridge : MonoBehaviour
 {
     private const string BridgeClassName = "org.videolan.vlc.bridge.PlaybackServiceBridge";
     private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
+    private const string DefaultSubtitleFontSize = "16";
+    private const int DefaultSubtitleOpacity = 255;
     private static VlcPlaybackBridge _instance;
 
     // --- 事件回调 ---
@@ -1043,6 +1045,70 @@ public class VlcPlaybackBridge : MonoBehaviour
         }
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetSubtitleRenderMode is only supported on Android device.");
+#endif
+    }
+
+    public static string GetSubtitleFontSize()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<string>("getSubtitleFontSize") ?? DefaultSubtitleFontSize;
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetSubtitleFontSize failed: {e.Message}");
+        }
+#endif
+
+        return DefaultSubtitleFontSize;
+    }
+
+    public static void SetSubtitleFontSize(string value)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("setSubtitleFontSize", value ?? DefaultSubtitleFontSize);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleFontSize failed: {e.Message}");
+        }
+#endif
+    }
+
+    public static int GetSubtitleOpacity()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                return bridge.CallStatic<int>("getSubtitleOpacity");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetSubtitleOpacity failed: {e.Message}");
+        }
+#endif
+
+        return DefaultSubtitleOpacity;
+    }
+
+    public static void SetSubtitleOpacity(int value)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("setSubtitleOpacity", value);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetSubtitleOpacity failed: {e.Message}");
+        }
 #endif
     }
 

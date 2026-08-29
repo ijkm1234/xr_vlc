@@ -12,7 +12,7 @@ namespace XRVLC
         private const float UnderlaySurfaceOffsetMeters = -0.001f;
         private const float ScreenSubtitleForwardOffsetMeters = -3f;
         private const float ImmersiveSubtitleDistanceMeters = 5f;
-        private const float ImmersiveSubtitleDownOffsetMeters = 3f;
+        private const float ImmersiveSubtitleDownOffsetMeters = 4f;
         private const float ImmersiveSubtitleWidthMeters = 5.2f;
         private const int CylinderAlphaHoleSegments = 32;
         private const int FlatVisibilityGridSize = 3;
@@ -62,7 +62,7 @@ namespace XRVLC
 
                 float width = GetWorldAxisLength(reference, Vector3.right);
                 float height = GetWorldAxisLength(reference, Vector3.up);
-                if (width <= 0.001f || height <= 0.001f)
+                if (!IsFinitePositive(width) || !IsFinitePositive(height))
                     return new Vector2(16f, 9f);
 
                 return new Vector2(width, height);
@@ -745,12 +745,14 @@ namespace XRVLC
         }
 
         /// <summary>
-        /// 将摇杆前后输入转为平面/曲面视频缩放，或 180 半球径向移动。
+        /// 将摇杆前后输入转为平面/曲面视频缩放，或仅移动 180 半球视频。
+        /// 全景字幕保持当前位置，不跟随摇杆前后移动。
         /// </summary>
         public void AddViewerDistanceOffset(float deltaMeters)
         {
             _transformService?.AddViewerDistanceOffset(deltaMeters);
-            RefreshFlatSubtitleLayerGeometry();
+            if (!IsImmersiveProjection)
+                RefreshFlatSubtitleLayerGeometry();
         }
 
         /// <summary>
@@ -883,12 +885,18 @@ namespace XRVLC
                 contentHeight,
                 renderOutsideScreen,
                 attachToVideoSurface);
-            _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.SizeMeters);
-            _flatSubtitleOverlaySurface.RebuildLayer(surfaceWidth, surfaceHeight, _currentStereo);
+            _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.ScaleMeters);
+            _flatSubtitleOverlaySurface.RebuildLayer(
+                surfaceWidth,
+                surfaceHeight,
+                _currentStereo,
+                _currentProjection,
+                _currentCurveMode,
+                attachToVideoSurface);
             Debug.Log(
                 $"[VideoScreen] Flat subtitle layer rebuild dispatched: ready={_flatSubtitleOverlaySurface.IsHardwareSurfaceReady()}, " +
                 $"surface={_flatSubtitleOverlaySurface.GetHardwareSurfaceHandle()}, center={geometry.Center}, " +
-                $"sizeMeters={geometry.SizeMeters}, rotation={geometry.Rotation.eulerAngles}");
+                $"scaleMeters={geometry.ScaleMeters}, rotation={geometry.Rotation.eulerAngles}");
             return true;
         }
 
@@ -931,7 +939,7 @@ namespace XRVLC
                 _flatSubtitleContentHeight,
                 _flatSubtitleRenderOutsideScreen,
                 _flatSubtitleAttachToVideoSurface);
-            _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.SizeMeters);
+            _flatSubtitleOverlaySurface.SetWorldGeometry(geometry.Center, geometry.Rotation, geometry.ScaleMeters);
         }
 
         private SubtitleLayerGeometry CalculateSubtitleLayerGeometry(
@@ -944,12 +952,23 @@ namespace XRVLC
             Vector3 center;
             Vector2 size;
 
+            if (attachToVideoSurface && _currentProjection == VideoProjection.Cylinder)
+            {
+                return new SubtitleLayerGeometry(
+                    videoAnchor.position,
+                    rotation,
+                    new Vector3(
+                        GetWorldAxisLength(videoAnchor, Vector3.right),
+                        GetWorldAxisLength(videoAnchor, Vector3.up),
+                        GetWorldAxisLength(videoAnchor, Vector3.forward)));
+            }
+
             if (attachToVideoSurface && _currentProjection == VideoProjection.Flat)
             {
                 return new SubtitleLayerGeometry(
                     videoAnchor.position,
                     rotation,
-                    SubtitleReferenceSizeMeters);
+                    ToFlatLayerScale(SubtitleReferenceSizeMeters));
             }
 
             if (IsImmersiveProjection)
@@ -960,7 +979,18 @@ namespace XRVLC
                 size = new Vector2(ImmersiveSubtitleWidthMeters, Mathf.Max(0.001f, height));
                 center = videoAnchor.position + videoAnchor.forward * ImmersiveSubtitleDistanceMeters;
                 center -= videoAnchor.up * ImmersiveSubtitleDownOffsetMeters;
-                return new SubtitleLayerGeometry(center, rotation, size);
+
+                // PXR Quad 的正面法线为局部 -Z；让局部 +Z 从头显指向字幕中心，
+                // 可确保字幕降低后仍正对头显，而不是继续沿用视频锚点的水平朝向。
+                Transform viewer = GetViewerTransform();
+                if (viewer != null)
+                {
+                    Vector3 viewerToSubtitle = center - viewer.position;
+                    if (viewerToSubtitle.sqrMagnitude > 0.000001f)
+                        rotation = Quaternion.LookRotation(viewerToSubtitle, videoAnchor.up);
+                }
+
+                return new SubtitleLayerGeometry(center, rotation, ToFlatLayerScale(size));
             }
 
             size = SubtitleReferenceSizeMeters;
@@ -975,7 +1005,12 @@ namespace XRVLC
                 size = ScaleSubtitleSizeByCameraDistanceRatio(size, center);
             }
 
-            return new SubtitleLayerGeometry(center, rotation, size);
+            return new SubtitleLayerGeometry(center, rotation, ToFlatLayerScale(size));
+        }
+
+        private static Vector3 ToFlatLayerScale(Vector2 sizeMeters)
+        {
+            return new Vector3(sizeMeters.x, sizeMeters.y, 1f);
         }
 
         private Vector2 ScaleSubtitleSizeByCameraDistanceRatio(Vector2 referenceSize, Vector3 subtitleSurfaceCenter)
@@ -990,11 +1025,19 @@ namespace XRVLC
             Vector3 videoSurfaceCenter = videoAnchor.position + videoAnchor.forward * SubtitleAnchorSurfaceOffsetMeters;
             float videoSurfaceDistance = Vector3.Distance(viewer.position, videoSurfaceCenter);
             float subtitleSurfaceDistance = Vector3.Distance(viewer.position, subtitleSurfaceCenter);
-            if (videoSurfaceDistance <= 0.001f || subtitleSurfaceDistance <= 0.001f)
+            if (!IsFinitePositive(videoSurfaceDistance) || !IsFinitePositive(subtitleSurfaceDistance))
                 return referenceSize;
 
             float distanceRatio = subtitleSurfaceDistance / videoSurfaceDistance;
+            if (!IsFinitePositive(distanceRatio))
+                return referenceSize;
+
             return referenceSize * distanceRatio;
+        }
+
+        private static bool IsFinitePositive(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0.001f;
         }
 
         private static float GetWorldAxisLength(Transform reference, Vector3 localAxis)
@@ -1016,16 +1059,16 @@ namespace XRVLC
 
         private readonly struct SubtitleLayerGeometry
         {
-            public SubtitleLayerGeometry(Vector3 center, Quaternion rotation, Vector2 sizeMeters)
+            public SubtitleLayerGeometry(Vector3 center, Quaternion rotation, Vector3 scaleMeters)
             {
                 Center = center;
                 Rotation = rotation;
-                SizeMeters = sizeMeters;
+                ScaleMeters = scaleMeters;
             }
 
             public Vector3 Center { get; }
             public Quaternion Rotation { get; }
-            public Vector2 SizeMeters { get; }
+            public Vector3 ScaleMeters { get; }
         }
     }
 }

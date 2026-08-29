@@ -20,6 +20,7 @@ namespace XRVLC.Media
         private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
         private const float SurfaceRebuildPauseTimeoutSeconds = 1.5f;
         private const int CodecBufferAlignmentPixels = 16;
+        private const uint MaxSubtitleSurfaceEdgePixels = 1920u;
 
         public static PlaybackService Instance { get; private set; }
 
@@ -1612,7 +1613,8 @@ namespace XRVLC.Media
             _boundSubtitleSurfaceSpec = null;
             Debug.Log(
                 $"[PlaybackService] Flat subtitle layer rebuild requested: rawSize={_currentWidth}x{_currentHeight}, contentSize={CurrentVideoSize.ContentWidth}x{CurrentVideoSize.ContentHeight}, " +
-                $"mode={SubtitleRenderMode}, projection={CurrentGeometrySelection.Projection}, outside={RenderSubtitlesOutsideScreen}");
+                $"surfaceSize={subtitleSpec.SurfaceWidth}x{subtitleSpec.SurfaceHeight}, mode={SubtitleRenderMode}, " +
+                $"projection={CurrentGeometrySelection.Projection}, outside={RenderSubtitlesOutsideScreen}");
 
             if (!videoScreen.RebuildFlatSubtitleLayer(
                     subtitleSpec.SurfaceWidth,
@@ -1669,22 +1671,44 @@ namespace XRVLC.Media
 
             uint contentWidth = (uint)CurrentVideoSize.ContentWidth;
             uint contentHeight = (uint)CurrentVideoSize.ContentHeight;
-            uint surfaceWidth = contentWidth;
+            CalculateSubtitleSurfaceSize(
+                contentWidth,
+                contentHeight,
+                out uint surfaceWidth,
+                out uint surfaceHeight);
             bool renderOutsideScreen = ShouldRenderSubtitlesOutsideScreen();
-            uint surfaceHeight = UsesSingleHeightSubtitleSurface()
-                ? contentHeight
-                : contentHeight * 2u;
 
             spec = new SubtitleSurfaceSpec(
                 surfaceWidth,
                 surfaceHeight,
                 contentWidth,
                 contentHeight,
+                CurrentGeometrySelection.Projection,
+                CurrentGeometrySelection.CurveMode,
                 CurrentGeometrySelection.Stereo,
                 renderOutsideScreen,
                 ShouldStackSubtitlesOutside(),
                 SubtitleRenderMode);
             return true;
+        }
+
+        private static void CalculateSubtitleSurfaceSize(
+            uint contentWidth,
+            uint contentHeight,
+            out uint surfaceWidth,
+            out uint surfaceHeight)
+        {
+            uint maxEdge = Math.Max(contentWidth, contentHeight);
+            if (maxEdge <= MaxSubtitleSurfaceEdgePixels)
+            {
+                surfaceWidth = contentWidth;
+                surfaceHeight = contentHeight;
+                return;
+            }
+
+            double scale = MaxSubtitleSurfaceEdgePixels / (double)maxEdge;
+            surfaceWidth = Math.Max(1u, (uint)Math.Round(contentWidth * scale));
+            surfaceHeight = Math.Max(1u, (uint)Math.Round(contentHeight * scale));
         }
 
         private bool IsVideoLayerCurrent(VideoLayerSpec spec)
@@ -1783,13 +1807,6 @@ namespace XRVLC.Media
             return mode == SubtitleRenderMode.Native
                 || mode == SubtitleRenderMode.Spatial
                 || mode == SubtitleRenderMode.DualDebug;
-        }
-
-        private bool UsesSingleHeightSubtitleSurface()
-        {
-            return (CurrentGeometrySelection.Projection == VideoProjection.Flat
-                    || CurrentGeometrySelection.Projection == VideoProjection.Cylinder)
-                && !ShouldRenderSubtitlesOutsideScreen();
         }
 
         private bool ShouldRenderSubtitlesOutsideScreen()
@@ -1942,6 +1959,8 @@ namespace XRVLC.Media
                 uint surfaceHeight,
                 uint contentWidth,
                 uint contentHeight,
+                VideoProjection projection,
+                FlatVideoCurveMode curveMode,
                 StereoMode stereo,
                 bool renderOutsideScreen,
                 bool stackOutside,
@@ -1951,6 +1970,8 @@ namespace XRVLC.Media
                 SurfaceHeight = surfaceHeight;
                 ContentWidth = contentWidth;
                 ContentHeight = contentHeight;
+                Projection = projection;
+                CurveMode = curveMode;
                 Stereo = stereo;
                 RenderOutsideScreen = renderOutsideScreen;
                 StackOutside = stackOutside;
@@ -1961,6 +1982,8 @@ namespace XRVLC.Media
             public uint SurfaceHeight { get; }
             public uint ContentWidth { get; }
             public uint ContentHeight { get; }
+            public VideoProjection Projection { get; }
+            public FlatVideoCurveMode CurveMode { get; }
             public StereoMode Stereo { get; }
             public bool RenderOutsideScreen { get; }
             public bool StackOutside { get; }
@@ -1972,6 +1995,8 @@ namespace XRVLC.Media
                     && SurfaceHeight == other.SurfaceHeight
                     && ContentWidth == other.ContentWidth
                     && ContentHeight == other.ContentHeight
+                    && Projection == other.Projection
+                    && CurveMode == other.CurveMode
                     && Stereo == other.Stereo
                     && RenderOutsideScreen == other.RenderOutsideScreen
                     && StackOutside == other.StackOutside

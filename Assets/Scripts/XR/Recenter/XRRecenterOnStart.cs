@@ -6,6 +6,7 @@ using XRVLC.Infrastructure.Pico;
 
 [AddComponentMenu("XR/XR Recenter On Start")]
 [RequireComponent(typeof(XROrigin))]
+[DefaultExecutionOrder(100)]
 public class XRRecenterOnStart : MonoBehaviour
 {
     const float TrackingWaitTimeoutSeconds = 3f;
@@ -13,6 +14,7 @@ public class XRRecenterOnStart : MonoBehaviour
     XROrigin m_XROrigin;
     Coroutine m_StartupRecenterCoroutine;
     bool m_StartupAlignmentFinished;
+    bool m_StartCalled;
 
     void Awake()
     {
@@ -23,8 +25,14 @@ public class XRRecenterOnStart : MonoBehaviour
     {
         PicoRecenterEvents.RecenterSuccess += OnSystemRecenter;
 
-        if (!m_StartupAlignmentFinished && m_StartupRecenterCoroutine == null)
-            m_StartupRecenterCoroutine = StartCoroutine(WaitForTrackingAndRecenter());
+        if (m_StartCalled)
+            StartStartupAlignmentIfNeeded();
+    }
+
+    void Start()
+    {
+        m_StartCalled = true;
+        StartStartupAlignmentIfNeeded();
     }
 
     void OnDisable()
@@ -38,14 +46,33 @@ public class XRRecenterOnStart : MonoBehaviour
         }
     }
 
+    void StartStartupAlignmentIfNeeded()
+    {
+        if (!m_StartupAlignmentFinished && m_StartupRecenterCoroutine == null)
+            m_StartupRecenterCoroutine = StartCoroutine(WaitForTrackingAndRecenter());
+    }
+
     IEnumerator WaitForTrackingAndRecenter()
     {
         float waitStartedAt = Time.realtimeSinceStartup;
-        Debug.Log("[XRRecenterOnStart] Waiting for valid HMD position and rotation tracking.");
+        bool xrOriginInitialized = false;
+        Debug.Log("[XRRecenterOnStart] Waiting for XROrigin initialization and valid HMD tracking.");
 
         while (Time.realtimeSinceStartup - waitStartedAt < TrackingWaitTimeoutSeconds)
         {
-            if (IsHeadTrackingValid() && TryRecenter())
+            if (!xrOriginInitialized)
+            {
+                xrOriginInitialized = IsXrOriginInitialized();
+                if (xrOriginInitialized)
+                {
+                    ColdStartSplashOverlay.MarkXrOriginInitialized();
+                    Debug.Log(
+                        $"[XRRecenterOnStart] XROrigin initialized with tracking mode " +
+                        $"{m_XROrigin.CurrentTrackingOriginMode}.");
+                }
+            }
+
+            if (xrOriginInitialized && IsHeadTrackingValid() && TryRecenter())
             {
                 m_StartupAlignmentFinished = true;
                 m_StartupRecenterCoroutine = null;
@@ -59,8 +86,32 @@ public class XRRecenterOnStart : MonoBehaviour
 
         m_StartupAlignmentFinished = true;
         m_StartupRecenterCoroutine = null;
+        if (!xrOriginInitialized)
+            ColdStartSplashOverlay.MarkXrOriginInitializationTimedOut();
         ColdStartSplashOverlay.MarkWorldAlignmentTimedOut();
-        Debug.LogWarning($"[XRRecenterOnStart] HMD tracking did not become valid within {TrackingWaitTimeoutSeconds:0.#} seconds; startup recenter skipped.");
+        Debug.LogWarning(
+            $"[XRRecenterOnStart] XROrigin initialization or HMD tracking did not become valid within " +
+            $"{TrackingWaitTimeoutSeconds:0.#} seconds; startup recenter skipped. " +
+            $"xrOriginInitialized={xrOriginInitialized}, trackingMode={m_XROrigin.CurrentTrackingOriginMode}.");
+    }
+
+    bool IsXrOriginInitialized()
+    {
+        if (m_XROrigin == null)
+            return false;
+
+        TrackingOriginModeFlags currentMode = m_XROrigin.CurrentTrackingOriginMode;
+        return m_XROrigin.RequestedTrackingOriginMode switch
+        {
+            XROrigin.TrackingOriginMode.NotSpecified => currentMode != TrackingOriginModeFlags.Unknown,
+            XROrigin.TrackingOriginMode.Device =>
+                (currentMode & TrackingOriginModeFlags.Device) != 0,
+            XROrigin.TrackingOriginMode.Floor =>
+                (currentMode & TrackingOriginModeFlags.Floor) != 0,
+            XROrigin.TrackingOriginMode.Unbounded =>
+                (currentMode & TrackingOriginModeFlags.Unbounded) != 0,
+            _ => false
+        };
     }
 
     static bool IsHeadTrackingValid()

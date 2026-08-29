@@ -1697,7 +1697,11 @@ public class VRUIManager : MonoBehaviour
 
         if (playbackService == null)
             playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
-        settingsMenuController.Bind(playbackService, FindAnyObjectByType<XRVLC.XR.ShortcutManager>());
+        settingsMenuController.Bind(
+            playbackService,
+            FindAnyObjectByType<XRVLC.XR.ShortcutManager>(),
+            chromaKeySliderPrefab,
+            progressSlider);
 
         if (created)
             settingsMenu.SetActive(false);

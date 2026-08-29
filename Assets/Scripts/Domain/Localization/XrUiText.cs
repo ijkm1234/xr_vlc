@@ -34,7 +34,16 @@ namespace XRVLC.Localization
         public const string SettingsButtonB = "settings.shortcut.button_b";
         public const string SettingsSpatialSubtitles = "settings.toggle.spatial_subtitles";
         public const string SettingsSubtitlesOutside = "settings.toggle.subtitles_outside";
+        public const string SettingsSubtitleFont = "settings.row.subtitle_font";
+        public const string SettingsSubtitleOpacity = "settings.row.subtitle_opacity";
         public const string SettingsSubtitleDelay = "settings.row.subtitle_delay";
+        public const string SettingsSubtitleFontNano = "settings.subtitle_font.nano";
+        public const string SettingsSubtitleFontMicro = "settings.subtitle_font.micro";
+        public const string SettingsSubtitleFontSmallest = "settings.subtitle_font.smallest";
+        public const string SettingsSubtitleFontSmall = "settings.subtitle_font.small";
+        public const string SettingsSubtitleFontNormal = "settings.subtitle_font.normal";
+        public const string SettingsSubtitleFontBig = "settings.subtitle_font.big";
+        public const string SettingsSubtitleFontHuge = "settings.subtitle_font.huge";
         public const string SettingsPlaybackRate = "settings.row.playback_rate";
         public const string SettingsAspectRatio = "settings.row.aspect_ratio";
         public const string SettingsAspectRatioAuto = "settings.aspect_ratio.auto";
@@ -121,7 +130,16 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsButtonB] = "B button",
             [XrUiTextKey.SettingsSpatialSubtitles] = "Use spatial subtitles",
             [XrUiTextKey.SettingsSubtitlesOutside] = "Render outside screen",
+            [XrUiTextKey.SettingsSubtitleFont] = "Font size",
+            [XrUiTextKey.SettingsSubtitleOpacity] = "Opacity",
             [XrUiTextKey.SettingsSubtitleDelay] = "Subtitle delay",
+            [XrUiTextKey.SettingsSubtitleFontNano] = "Tiny",
+            [XrUiTextKey.SettingsSubtitleFontMicro] = "Very small",
+            [XrUiTextKey.SettingsSubtitleFontSmallest] = "Smaller",
+            [XrUiTextKey.SettingsSubtitleFontSmall] = "Small",
+            [XrUiTextKey.SettingsSubtitleFontNormal] = "Normal",
+            [XrUiTextKey.SettingsSubtitleFontBig] = "Large",
+            [XrUiTextKey.SettingsSubtitleFontHuge] = "Huge",
             [XrUiTextKey.SettingsPlaybackRate] = "Speed",
             [XrUiTextKey.SettingsAspectRatio] = "Aspect ratio",
             [XrUiTextKey.SettingsAspectRatioAuto] = "Auto",
@@ -193,7 +211,7 @@ namespace XRVLC.Localization
                 "摇杆前后：调整屏幕距离\n" +
                 "板机键长按：2x 快速播放\n" +
                 "抓取键：移动屏幕\n" +
-                "按下摇杆：重置屏幕位置",
+                "按下摇杆：恢复屏幕位置",
             [XrUiTextKey.SettingsSeekStep] = "步进时长",
             [XrUiTextKey.SettingsLeftStickClick] = "左摇杆按下",
             [XrUiTextKey.SettingsRightStickClick] = "右摇杆按下",
@@ -201,7 +219,16 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsButtonB] = "B 按钮",
             [XrUiTextKey.SettingsSpatialSubtitles] = "使用空间字幕",
             [XrUiTextKey.SettingsSubtitlesOutside] = "渲染在屏幕外",
+            [XrUiTextKey.SettingsSubtitleFont] = "字体",
+            [XrUiTextKey.SettingsSubtitleOpacity] = "透明度",
             [XrUiTextKey.SettingsSubtitleDelay] = "字幕延迟",
+            [XrUiTextKey.SettingsSubtitleFontNano] = "极小",
+            [XrUiTextKey.SettingsSubtitleFontMicro] = "很小",
+            [XrUiTextKey.SettingsSubtitleFontSmallest] = "较小",
+            [XrUiTextKey.SettingsSubtitleFontSmall] = "小",
+            [XrUiTextKey.SettingsSubtitleFontNormal] = "普通",
+            [XrUiTextKey.SettingsSubtitleFontBig] = "大",
+            [XrUiTextKey.SettingsSubtitleFontHuge] = "超大",
             [XrUiTextKey.SettingsPlaybackRate] = "倍速",
             [XrUiTextKey.SettingsAspectRatio] = "宽高比",
             [XrUiTextKey.SettingsAspectRatioAuto] = "自动",

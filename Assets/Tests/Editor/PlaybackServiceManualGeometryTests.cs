@@ -190,15 +190,16 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void PlaybackService_UsesSingleHeightSubtitleSurfaceForFlatAndCylinderScreenSubtitles()
+        public void PlaybackService_CapsSubtitleSurfaceLongestEdgeWithoutChangingAspectRatio()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Playback/PlaybackService.cs");
             string source = File.ReadAllText(path);
-            string method = ExtractMethod(source, "UsesSingleHeightSubtitleSurface", "private bool");
+            string method = ExtractMethod(source, "CalculateSubtitleSurfaceSize", "private static void");
 
-            StringAssert.Contains("CurrentGeometrySelection.Projection == VideoProjection.Flat", method);
-            StringAssert.Contains("CurrentGeometrySelection.Projection == VideoProjection.Cylinder", method);
-            StringAssert.Contains("&& !RenderSubtitlesOutsideScreen", method);
+            StringAssert.Contains("MaxSubtitleSurfaceEdgePixels", method);
+            StringAssert.Contains("double scale", method);
+            StringAssert.Contains("contentWidth * scale", method);
+            StringAssert.Contains("contentHeight * scale", method);
         }
 
         [Test]
@@ -222,7 +223,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("FitVideoSize(contentWidth, contentHeight)", rebuildMethod);
             StringAssert.Contains("uint contentWidth = (uint)CurrentVideoSize.ContentWidth", subtitleSpecMethod);
             StringAssert.Contains("uint contentHeight = (uint)CurrentVideoSize.ContentHeight", subtitleSpecMethod);
-            StringAssert.Contains("uint surfaceWidth = contentWidth", subtitleSpecMethod);
+            StringAssert.Contains("CalculateSubtitleSurfaceSize(", subtitleSpecMethod);
             StringAssert.Contains("videoScreen.RebuildFlatSubtitleLayer(", subtitleRebuildMethod);
             StringAssert.Contains("subtitleSpec.SurfaceWidth", subtitleRebuildMethod);
             StringAssert.Contains("subtitleSpec.ContentWidth", subtitleRebuildMethod);
@@ -532,15 +533,18 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void VideoScreen_OffsetsImmersiveSubtitleLayerDownInLocalSpace()
+        public void VideoScreen_OffsetsImmersiveSubtitleLayerDownAndFacesViewer()
         {
             string path = Path.Combine(Application.dataPath, "Scripts/Services/Screen/VideoScreen.cs");
             string source = File.ReadAllText(path);
             string calculateMethod = ExtractMethod(source, "CalculateSubtitleLayerGeometry", "private SubtitleLayerGeometry");
 
-            StringAssert.Contains("private const float ImmersiveSubtitleDownOffsetMeters = 3f", source);
+            StringAssert.Contains("private const float ImmersiveSubtitleDistanceMeters = 5f", source);
+            StringAssert.Contains("private const float ImmersiveSubtitleDownOffsetMeters = 4f", source);
             StringAssert.Contains("center = videoAnchor.position + videoAnchor.forward * ImmersiveSubtitleDistanceMeters", calculateMethod);
             StringAssert.Contains("center -= videoAnchor.up * ImmersiveSubtitleDownOffsetMeters", calculateMethod);
+            StringAssert.Contains("Transform viewer = GetViewerTransform()", calculateMethod);
+            StringAssert.Contains("Quaternion.LookRotation(viewerToSubtitle, videoAnchor.up)", calculateMethod);
             Assert.Less(
                 calculateMethod.IndexOf("center -= videoAnchor.up * ImmersiveSubtitleDownOffsetMeters", System.StringComparison.Ordinal),
                 calculateMethod.IndexOf("return new SubtitleLayerGeometry(center, rotation, size)", System.StringComparison.Ordinal),

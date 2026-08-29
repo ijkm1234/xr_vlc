@@ -404,7 +404,7 @@ namespace XRVLC.Tests
             StringAssert.Contains("Flat subtitle layer rebuild entry", videoScreenSource);
             StringAssert.Contains("Flat subtitle layer rebuild dispatched", videoScreenSource);
             StringAssert.Contains("UpdateNativeSubtitleSurfaceBinding()", playbackServiceSource);
-            StringAssert.Contains("UsesSingleHeightSubtitleSurface()", playbackServiceSource);
+            StringAssert.Contains("CalculateSubtitleSurfaceSize(", playbackServiceSource);
             StringAssert.Contains("private static bool UsesFlatSubtitleSurfaceMode(SubtitleRenderMode mode)", playbackServiceSource);
             StringAssert.Contains("mode == SubtitleRenderMode.Spatial", playbackServiceSource);
             StringAssert.Contains("private void BindSubtitleSurface(SubtitleSurfaceSpec subtitleSpec)", playbackServiceSource);
