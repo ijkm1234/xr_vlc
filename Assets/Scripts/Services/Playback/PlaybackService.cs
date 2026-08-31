@@ -174,8 +174,6 @@ namespace XRVLC.Media
             CurrentVideoAspectRatio = PlaybackUiSettingsService.LoadVideoAspectRatio();
             videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
 
-            // 初始化底层渲染屏幕
-            videoScreen.RebuildLayer(UseHardwareDecoding);
             _geometryService = CreateGeometryService(videoScreen);
 
             // 订阅 Bridge 回调
