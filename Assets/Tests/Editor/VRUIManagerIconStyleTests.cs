@@ -1821,13 +1821,11 @@ namespace XRVLC.Tests
             StringAssert.DoesNotContain("SubtitleRenderMode.Off", source);
             StringAssert.Contains("ApplyVideoAspectRatio", source);
             StringAssert.DoesNotContain("ApplyVideoScaleMode", source);
-            StringAssert.Contains("VlcPlaybackBridge.SetAudioChannelMode", source);
             StringAssert.Contains("_audioBoostSwitchButton", source);
             StringAssert.Contains("CreateSwitchRow(root.transform, \"AudioBoostSwitchRow\", XrUiText.Get(XrUiTextKey.SettingsAudioBoost), ToggleAudioBoost)", source);
-            StringAssert.Contains("_mixToMonoSwitchButton", source);
-            StringAssert.Contains("CreateSwitchRow(root.transform, \"MixToMonoSwitchRow\", XrUiText.Get(XrUiTextKey.SettingsAudioMono), ToggleMixToMono)", source);
-            StringAssert.Contains("UpdateMixToMonoSwitch()", source);
-            StringAssert.Contains("_mixToMonoEnabled = VlcPlaybackBridge.ShouldMixAudioToMono()", source);
+            StringAssert.DoesNotContain("MixToMonoSwitchRow", source);
+            StringAssert.DoesNotContain("ToggleMixToMono", source);
+            StringAssert.DoesNotContain("ShouldMixAudioToMono", source);
             StringAssert.DoesNotContain("CreateSectionLabel(root.transform, \"声道输出\")", source);
             StringAssert.DoesNotContain("CreateButton(row, \"立体声\"", source);
             StringAssert.DoesNotContain("CreateButton(row, \"混合单声道\"", source);
@@ -1984,10 +1982,8 @@ namespace XRVLC.Tests
 
             StringAssert.Contains("SetVideoScaleOrdinal", source);
             StringAssert.Contains("bridge.CallStatic(\"setVideoScale\"", source);
-            StringAssert.Contains("SetAudioChannelMode", source);
-            StringAssert.Contains("bridge.CallStatic(\"setAudioChannelMode\"", source);
-            StringAssert.Contains("public static bool ShouldMixAudioToMono()", source);
-            StringAssert.Contains("bridge.CallStatic<bool>(\"shouldMixAudioToMono\")", source);
+            StringAssert.DoesNotContain("SetAudioChannelMode", source);
+            StringAssert.DoesNotContain("ShouldMixAudioToMono", source);
             StringAssert.Contains("public static bool IsAudioBoostEnabled()", source);
             StringAssert.Contains("bridge.CallStatic<bool>(\"isAudioBoostEnabled\")", source);
             StringAssert.Contains("public static void SetAudioBoostEnabled(bool enabled)", source);
@@ -2010,9 +2006,8 @@ namespace XRVLC.Tests
             StringAssert.Contains("fun setVideoScale", source);
             StringAssert.Contains("VIDEO_RATIO", source);
             StringAssert.Contains("MediaPlayer.ScaleType.entries", source);
-            StringAssert.Contains("fun setAudioChannelMode", source);
-            StringAssert.Contains("fun shouldMixAudioToMono(): Boolean", source);
-            StringAssert.Contains("return audioChannelMode == XR_AUDIO_CHANNEL_MONO", source);
+            StringAssert.DoesNotContain("fun setAudioChannelMode", source);
+            StringAssert.DoesNotContain("fun shouldMixAudioToMono", source);
             StringAssert.Contains("fun isAudioBoostEnabled(): Boolean", source);
             StringAssert.Contains("fun setAudioBoostEnabled(enabled: Boolean)", source);
             StringAssert.Contains("putSingle(KEY_AUDIO_BOOST, enabled)", source);
@@ -2027,7 +2022,7 @@ namespace XRVLC.Tests
         }
 
         [Test]
-        public void AndroidPlaylistManager_AppliesMonoAudioFilterWhenXrSwitchEnabled()
+        public void AndroidPlaylistManager_DoesNotApplyMonoAudioFilter()
         {
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
             string playlistManagerPath = Path.Combine(
@@ -2035,9 +2030,9 @@ namespace XRVLC.Tests
                 "../vlc-android/application/vlc-android/src/org/videolan/vlc/media/PlaylistManager.kt");
             string source = File.ReadAllText(playlistManagerPath);
 
-            StringAssert.Contains("PlaybackServiceBridge.shouldMixAudioToMono()", source);
-            StringAssert.Contains("media.addOption(\":audio-filter=mono\")", source);
-            StringAssert.Contains("Enabled mono downmix audio filter", source);
+            StringAssert.DoesNotContain("PlaybackServiceBridge.shouldMixAudioToMono()", source);
+            StringAssert.DoesNotContain("media.addOption(\":audio-filter=mono\")", source);
+            StringAssert.DoesNotContain("Enabled mono downmix audio filter", source);
             StringAssert.DoesNotContain(":stereo-mode=6", source);
             StringAssert.DoesNotContain("--stereo-mode=6", source);
         }

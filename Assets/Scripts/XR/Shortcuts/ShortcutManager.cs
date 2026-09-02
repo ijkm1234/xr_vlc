@@ -89,9 +89,10 @@ namespace XRVLC.XR
             bool stickPressed = GetButton(device, CommonUsages.primary2DAxisClick);
             bool triggerPressed = GetButton(device, CommonUsages.triggerButton);
 
-            if (!blockUiTriggerAndStick && !stickPressed && axis.y > ShortcutInputState.StickThreshold)
+            bool isVerticalDirection = ShortcutInputState.IsVerticalStickDirection(axis);
+            if (!blockUiTriggerAndStick && !stickPressed && isVerticalDirection && axis.y > ShortcutInputState.StickThreshold)
                 _shortcutPlaybackService?.OffsetVideoScreenDistance(distanceStepMetersPerSecond * Time.deltaTime);
-            else if (!blockUiTriggerAndStick && !stickPressed && axis.y < -ShortcutInputState.StickThreshold)
+            else if (!blockUiTriggerAndStick && !stickPressed && isVerticalDirection && axis.y < -ShortcutInputState.StickThreshold)
                 _shortcutPlaybackService?.OffsetVideoScreenDistance(-distanceStepMetersPerSecond * Time.deltaTime);
 
             ShortcutCommand command = _inputState.UpdateHand(

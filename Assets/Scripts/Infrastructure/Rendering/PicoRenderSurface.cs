@@ -91,8 +91,10 @@ namespace XRVLC
             _compLayer.layerDepth = 0;
             _compLayer.useTextureAlphaBlending = useTextureAlphaBlending;
             _compLayer.usePremultipliedAlpha = false;
+            // 视频层保持关闭超采样。
             _compLayer.normalSupersampling = false;
-            _compLayer.qualitySupersampling = true;
+            _compLayer.qualitySupersampling = false;
+            _compLayer.fixedFoveatedSupersampling = false;
 
             Debug.Log($"[PicoRenderSurface] RebuildLayer — proj={proj}, isImmersive={isImmersive}, overlayType={_compLayer.overlayType}, shape={_compLayer.overlayShape}");
             SurfaceDebug(

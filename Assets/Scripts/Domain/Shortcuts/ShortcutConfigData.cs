@@ -41,9 +41,7 @@ namespace XRVLC
                 var dto = JsonUtility.FromJson<MappingDto>(json);
                 if (dto == null) return Defaults();
 
-                var data = new ShortcutConfigData();
-                data.SetAction(ShortcutButtons.RightStickClick, dto.right_stick_click);
-                data.SetAction(ShortcutButtons.LeftStickClick, dto.left_stick_click);
+                ShortcutConfigData data = Defaults();
                 data.SetAction(ShortcutButtons.ButtonB, dto.button_b);
                 data.SetAction(ShortcutButtons.ButtonY, dto.button_y);
                 return data;
@@ -67,7 +65,8 @@ namespace XRVLC
         };
 
         /// <summary>
-        /// 设置单个按键映射；未知操作会被归一化为“无操作”，避免坏配置触发异常。
+        /// 设置单个按键映射；左右摇杆按下始终固定为恢复屏幕位置。
+        /// B/Y 的未知操作会被归一化为“无操作”，避免坏配置触发异常。
         /// </summary>
         public void SetAction(string buttonId, string actionKey)
         {
@@ -78,10 +77,10 @@ namespace XRVLC
             switch (buttonId)
             {
                 case ShortcutButtons.RightStickClick:
-                    _rightStickClick = action;
+                    _rightStickClick = ShortcutActions.ResetScreenTransform;
                     break;
                 case ShortcutButtons.LeftStickClick:
-                    _leftStickClick = action;
+                    _leftStickClick = ShortcutActions.ResetScreenTransform;
                     break;
                 case ShortcutButtons.ButtonB:
                     _buttonB = action;

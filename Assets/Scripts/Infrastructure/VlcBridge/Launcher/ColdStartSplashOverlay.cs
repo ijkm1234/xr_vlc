@@ -19,6 +19,8 @@ public static class ColdStartSplashOverlay
     private static float s_XrVisibleAtRealtime;
     private static bool s_XrVisibleTimerStarted;
     private static bool s_HideRequested;
+    private static bool s_XrOriginInitialized;
+    private static bool s_XrOriginInitializationTimedOut;
     private static bool s_WorldCoordinatesAligned;
     private static bool s_WorldAlignmentTimedOut;
 
@@ -41,6 +43,8 @@ public static class ColdStartSplashOverlay
             return;
 #endif
         s_HideRequested = false;
+        s_XrOriginInitialized = false;
+        s_XrOriginInitializationTimedOut = false;
         s_WorldCoordinatesAligned = false;
         s_WorldAlignmentTimedOut = false;
         s_XrVisibleAtRealtime = 0f;
@@ -66,6 +70,20 @@ public static class ColdStartSplashOverlay
             return;
 
         s_HideRequested = true;
+        HideWhenReadyAfterMinimumVisibleTime();
+    }
+
+    public static void MarkXrOriginInitialized()
+    {
+        s_XrOriginInitialized = true;
+        Debug.Log("[ColdStartSplashOverlay] XROrigin initialized.");
+        HideWhenReadyAfterMinimumVisibleTime();
+    }
+
+    public static void MarkXrOriginInitializationTimedOut()
+    {
+        s_XrOriginInitializationTimedOut = true;
+        Debug.LogWarning("[ColdStartSplashOverlay] XROrigin initialization timed out; splash initialization gate released.");
         HideWhenReadyAfterMinimumVisibleTime();
     }
 
@@ -115,8 +133,8 @@ public static class ColdStartSplashOverlay
 
     private static void HideWhenReadyAfterMinimumVisibleTime()
     {
-        if (!s_HideRequested || !IsWorldAlignmentGateReleased() || s_Root == null ||
-            !s_XrVisibleTimerStarted)
+        if (!s_HideRequested || !IsXrOriginInitializationGateReleased() ||
+            !IsWorldAlignmentGateReleased() || s_Root == null || !s_XrVisibleTimerStarted)
             return;
 
         float remainingSeconds = GetRemainingMinimumVisibleSeconds();
@@ -148,6 +166,11 @@ public static class ColdStartSplashOverlay
     private static bool IsWorldAlignmentGateReleased()
     {
         return s_WorldCoordinatesAligned || s_WorldAlignmentTimedOut;
+    }
+
+    private static bool IsXrOriginInitializationGateReleased()
+    {
+        return s_XrOriginInitialized || s_XrOriginInitializationTimedOut;
     }
 
     private static void HideImmediately()

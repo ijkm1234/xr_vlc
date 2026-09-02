@@ -12,6 +12,7 @@ namespace XRVLC
 
         private PXR_CompositionLayer _compLayer;
         private IntPtr _hardwareSurfaceHandle = IntPtr.Zero;
+        private bool _usesVideoSurfaceAlphaHole;
 
         private static void SurfaceDebug(string message)
         {
@@ -34,13 +35,10 @@ namespace XRVLC
             _compLayer = GetComponent<PXR_CompositionLayer>();
         }
 
-        public void SetWorldGeometry(Vector3 center, Quaternion rotation, Vector2 sizeMeters)
+        public void SetWorldGeometry(Vector3 center, Quaternion rotation, Vector3 scaleMeters)
         {
             transform.SetPositionAndRotation(center, rotation);
-            transform.localScale = new Vector3(
-                Mathf.Max(0.001f, sizeMeters.x),
-                Mathf.Max(0.001f, sizeMeters.y),
-                1f);
+            SetWorldScale(scaleMeters);
 
             if (_compLayer != null)
             {
@@ -50,7 +48,13 @@ namespace XRVLC
             }
         }
 
-        public void RebuildLayer(uint surfaceWidth, uint surfaceHeight, StereoMode stereo)
+        public void RebuildLayer(
+            uint surfaceWidth,
+            uint surfaceHeight,
+            StereoMode stereo,
+            VideoProjection projection,
+            FlatVideoCurveMode curveMode,
+            bool attachToVideoSurface)
         {
             if (_compLayer == null)
                 _compLayer = GetComponent<PXR_CompositionLayer>();
@@ -79,13 +83,22 @@ namespace XRVLC
             _compLayer.textureType = PXR_CompositionLayer.TextureType.ExternalSurface;
             _compLayer.isExternalAndroidSurface = true;
             _compLayer.isDynamic = false;
-            _compLayer.overlayShape = PXR_CompositionLayer.OverlayShape.Quad;
+            bool conformsToVideoCylinder =
+                attachToVideoSurface && projection == VideoProjection.Cylinder;
+            _usesVideoSurfaceAlphaHole = conformsToVideoCylinder;
+            _compLayer.overlayShape = conformsToVideoCylinder
+                ? PXR_CompositionLayer.OverlayShape.Cylinder
+                : PXR_CompositionLayer.OverlayShape.Quad;
+            if (conformsToVideoCylinder)
+                _compLayer.radius = FlatVideoCurveMetrics.GetCylinderRadius(curveMode);
             _compLayer.overlayType = PXR_CompositionLayer.OverlayType.Underlay;
             _compLayer.layerDepth = 1;
             _compLayer.useTextureAlphaBlending = true;
             _compLayer.usePremultipliedAlpha = false;
+            // 诊断：保留字幕 Surface，但关闭去锯齿以排查 supersampling 是否导致撕裂。
             _compLayer.normalSupersampling = false;
-            _compLayer.qualitySupersampling = true;
+            _compLayer.qualitySupersampling = false;
+            _compLayer.fixedFoveatedSupersampling = false;
             _compLayer.externalAndroidSurface3DType = stereo switch
             {
                 StereoMode.LeftRight => PXR_CompositionLayer.Surface3DType.LeftRight,
@@ -124,6 +137,7 @@ namespace XRVLC
 
             Debug.Log(
                 $"[FlatSubtitleOverlaySurface] Rebuilt subtitle overlay surface {surfaceWidth}x{surfaceHeight}, stereo={stereo}, " +
+                $"projection={projection}, shape={_compLayer.overlayShape}, attachToVideo={attachToVideoSurface}, " +
                 $"parent={(transform.parent != null ? transform.parent.name : "none")}, localPosition={transform.localPosition}, " +
                 $"worldPosition={transform.position}, worldScale={transform.lossyScale}, overlayType={_compLayer.overlayType}, " +
                 $"externalObject={_compLayer.externalAndroidSurfaceObject}, ready={IsHardwareSurfaceReady()}");
@@ -170,7 +184,32 @@ namespace XRVLC
             if (_compLayer == null || !_compLayer.enabled || !isActiveAndEnabled)
                 return;
 
+            // 贴合曲面视频时，视频层已经注册了同一圆柱几何的 alpha hole。
+            // 继续为字幕注册 Quad 会在 eye buffer 中打出一个错误的平面孔洞。
+            if (_usesVideoSurfaceAlphaHole)
+            {
+                UnderlayAlphaHoleRegistry.Disable(transform);
+                return;
+            }
+
             UnderlayAlphaHoleRegistry.SetHole(transform, GetSubtitleAlphaHoleMesh());
+        }
+
+        private void SetWorldScale(Vector3 scaleMeters)
+        {
+            Vector3 targetWorldScale = new Vector3(
+                Mathf.Max(0.001f, Mathf.Abs(scaleMeters.x)),
+                Mathf.Max(0.001f, Mathf.Abs(scaleMeters.y)),
+                Mathf.Max(0.001f, Mathf.Abs(scaleMeters.z)));
+
+            // 字幕对象挂在 VideoScreen 下；先消除父节点缩放，再设置目标世界尺寸，
+            // 这样它能与可能位于不同层级中的 videoAnchor 保持完全相同的几何尺寸。
+            transform.localScale = Vector3.one;
+            Vector3 inheritedScale = transform.lossyScale;
+            transform.localScale = new Vector3(
+                targetWorldScale.x / Mathf.Max(0.001f, Mathf.Abs(inheritedScale.x)),
+                targetWorldScale.y / Mathf.Max(0.001f, Mathf.Abs(inheritedScale.y)),
+                targetWorldScale.z / Mathf.Max(0.001f, Mathf.Abs(inheritedScale.z)));
         }
 
         private static Mesh GetSubtitleAlphaHoleMesh()

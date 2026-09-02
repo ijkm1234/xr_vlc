@@ -21,9 +21,9 @@ VLC/libVLC 媒体栈。
 
 | Dependency | Pinned version |
 | --- | --- |
-| VLC for Android fork | tag `v0.0.1` (`34603a8ea2fdfe9aaea023d800b327226d6952e7`) |
-| libvlcjni fork | tag `v0.0.1` (`b13e2bb1e92595e2c3de7c8d9ba39eab70226674`) |
-| VLC/libVLC fork | tag `v0.0.1` (`d65ec2d64eb9d298cfe630ab915369ad0b253503`) |
+| VLC for Android fork | tag `v0.0.1` (`485e54231bc178fa0af52fad10bb001738f64f7b`) |
+| libvlcjni fork | tag `v0.0.1` (`1e0f2fa5114700381e61e90d796f7edf86a733da`) |
+| VLC/libVLC fork | tag `v0.0.1` (`fef678a7fcf79f717fd909a43cf737f415f4fa9e`) |
 
 顶层脚本通过公开 HTTPS 仓库解析并校验 VLC for Android 的标签和提交；
 该仓库的构建脚本再以相同方式校验 libvlcjni 与 VLC/libVLC。
@@ -69,6 +69,7 @@ export XRVLC_KEY_ALIAS_PASS="<alias-password>"
 
 Unity \
   -batchmode -quit \
+  -buildTarget Android \
   -projectPath . \
   -executeMethod CommandLineAndroidBuild.BuildRelease \
   -outputPath Builds/xr_vlc-release.apk \
@@ -76,6 +77,9 @@ Unity \
 ```
 
 执行前确保项目所需版本的 `Unity` 命令已加入 `PATH`。
+`-buildTarget Android` 必须在 Unity 启动时传入，尤其是清空 `Library` 后；否则
+PICO 的 Android Manifest 后处理可能不会参与本次构建，导致 APK 缺少 PICO SDK
+元数据并在启动时无法创建 Composition Layer。
 将输出扩展名改为 `.aab` 即构建 Android App Bundle。正式构建要求插件目录中
 只存在 `vlc-android-release.aar`；AAR 构建脚本会自动移除另一 variant。
 

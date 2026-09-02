@@ -5540,11 +5540,11 @@ MonoBehaviour:
   menuHeight: 420
   menuFontSize: 22
   dropdownFontSize: 20
-  shortcutDropdownWidth: 320
+  shortcutDropdownWidth: 220
   shortcutDropdownHeight: 48
   dropdownCornerRadius: 8
   dropdownBorderWidth: 1
-  sectionTitleLeftPadding: 104
+  contentLeftPadding: 110
 --- !u!114 &1232549852
 MonoBehaviour:
   m_ObjectHideFlags: 0

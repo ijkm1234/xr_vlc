@@ -7,6 +7,7 @@ namespace XRVLC
     {
         public const float StickThreshold = 0.5f;
         public const float FullStickThreshold = 0.95f;
+        public const float StickDirectionHalfAngleDegrees = 30f;
         public const float FullStickInitialSeekDelaySeconds = 1f;
         public const float FullStickRepeatSeekIntervalSeconds = 0.5f;
         public const float TriggerFastRateHoldSeconds = 0.5f;
@@ -48,7 +49,8 @@ namespace XRVLC
             bool suppressTriggerAndAxisShortcuts = false)
         {
             Vector2 previousAxis = GetPreviousAxis(hand);
-            SetPreviousAxis(hand, axis);
+            Vector2 horizontalAxis = IsHorizontalStickDirection(axis) ? axis : Vector2.zero;
+            SetPreviousAxis(hand, horizontalAxis);
 
             ShortcutCommand triggerCommand = UpdateTriggerHold(
                 hand,
@@ -58,9 +60,9 @@ namespace XRVLC
             if (triggerCommand.Type != ShortcutCommandType.None)
                 return triggerCommand;
 
-            if (!suppressTriggerAndAxisShortcuts && !stickPressed && axis.x > StickThreshold && previousAxis.x <= StickThreshold)
+            if (!suppressTriggerAndAxisShortcuts && !stickPressed && horizontalAxis.x > StickThreshold && previousAxis.x <= StickThreshold)
                 return new ShortcutCommand(ShortcutCommandType.SeekForward);
-            if (!suppressTriggerAndAxisShortcuts && !stickPressed && axis.x < -StickThreshold && previousAxis.x >= -StickThreshold)
+            if (!suppressTriggerAndAxisShortcuts && !stickPressed && horizontalAxis.x < -StickThreshold && previousAxis.x >= -StickThreshold)
                 return new ShortcutCommand(ShortcutCommandType.SeekBackward);
 
             if (suppressTriggerAndAxisShortcuts)
@@ -69,7 +71,7 @@ namespace XRVLC
             }
             else
             {
-                ShortcutCommand fullStickCommand = UpdateFullStickHold(hand, axis, stickPressed, deltaTimeSeconds);
+                ShortcutCommand fullStickCommand = UpdateFullStickHold(hand, horizontalAxis, stickPressed, deltaTimeSeconds);
                 if (fullStickCommand.Type != ShortcutCommandType.None)
                     return fullStickCommand;
             }
@@ -94,6 +96,33 @@ namespace XRVLC
             }
 
             return ShortcutCommand.None;
+        }
+
+        /// <summary>
+        /// 摇杆方向落在水平轴正负 30 度扇区内时，判定为左右输入。
+        /// </summary>
+        public static bool IsHorizontalStickDirection(Vector2 axis)
+        {
+            if (axis == Vector2.zero)
+                return false;
+
+            return GetStickAngleFromHorizontal(axis) <= StickDirectionHalfAngleDegrees;
+        }
+
+        /// <summary>
+        /// 摇杆方向落在垂直轴正负 30 度扇区内时，判定为上下输入。
+        /// </summary>
+        public static bool IsVerticalStickDirection(Vector2 axis)
+        {
+            if (axis == Vector2.zero)
+                return false;
+
+            return GetStickAngleFromHorizontal(axis) >= 90f - StickDirectionHalfAngleDegrees;
+        }
+
+        private static float GetStickAngleFromHorizontal(Vector2 axis)
+        {
+            return Mathf.Atan2(Mathf.Abs(axis.y), Mathf.Abs(axis.x)) * Mathf.Rad2Deg;
         }
 
         public void Reset()
