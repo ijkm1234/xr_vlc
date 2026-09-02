@@ -34,8 +34,6 @@ public class SettingsMenuController : MonoBehaviour
     private const string SettingsStyleSwitchResourcePath = "UI/SettingsStyleSwitch";
     private const string GestureInfoIconName = "info";
     private const string StepperControlResourcePath = "UI/XrStepperControl";
-    private const string AudioChannelStereoValue = "stereo";
-    private const string AudioChannelMonoValue = "mono";
     private const int SubtitleOpacityMinimum = 50;
     private const int SubtitleOpacityMaximum = 255;
     private const float SettingsControlLabelWidth = 180f;
@@ -134,15 +132,14 @@ public class SettingsMenuController : MonoBehaviour
     private Button _outsideSubtitleSwitchButton;
     private Button _audioBoostSwitchButton;
     private XrStepperControl _subtitleDelayStepper;
+    private XrStepperControl _audioDelayStepper;
     private XrDropdown _subtitleFontDropdown;
     private Slider _subtitleOpacitySlider;
     private TextMeshProUGUI _subtitleOpacityValueText;
     private XrStepperControl _playbackRateStepper;
     private XrStepperControl _seekSecondsStepper;
     private XrDropdown _videoAspectRatioDropdown;
-    private Button _mixToMonoSwitchButton;
     private VideoAspectRatio _currentVideoAspectRatio;
-    private bool _mixToMonoEnabled;
 
     public void Bind(
         XRVLC.Media.PlaybackService playbackService,
@@ -386,7 +383,14 @@ public class SettingsMenuController : MonoBehaviour
     private void BuildAudioTab(GameObject root)
     {
         _audioBoostSwitchButton = CreateSwitchRow(root.transform, "AudioBoostSwitchRow", XrUiText.Get(XrUiTextKey.SettingsAudioBoost), ToggleAudioBoost);
-        _mixToMonoSwitchButton = CreateSwitchRow(root.transform, "MixToMonoSwitchRow", XrUiText.Get(XrUiTextKey.SettingsAudioMono), ToggleMixToMono);
+        _audioDelayStepper = CreateStepperRow(
+            root.transform,
+            "AudioDelayRow",
+            XrUiText.Get(XrUiTextKey.SettingsAudioDelay),
+            "0.0",
+            () => StepAudioDelay(-0.5f),
+            () => StepAudioDelay(0.5f),
+            ApplyAudioDelayFromInput);
     }
 
     private XrDropdown CreateSubtitleFontDropdown(Transform parent)
@@ -1092,8 +1096,9 @@ public class SettingsMenuController : MonoBehaviour
         }
         if (tab == SettingsTab.Audio)
         {
+            _playbackService?.RefreshAudioDelayFromVlc();
             UpdateAudioBoostSwitch();
-            UpdateMixToMonoSwitch();
+            UpdateAudioDelayControl();
         }
     }
 
@@ -1107,8 +1112,8 @@ public class SettingsMenuController : MonoBehaviour
         UpdateSeekSecondsControl();
         UpdateVideoLayoutSelection();
         UpdateAudioBoostSwitch();
-        _mixToMonoEnabled = VlcPlaybackBridge.ShouldMixAudioToMono();
-        UpdateMixToMonoSwitch();
+        _playbackService?.RefreshAudioDelayFromVlc();
+        UpdateAudioDelayControl();
         LoadGestureValues();
     }
 
@@ -1211,6 +1216,29 @@ public class SettingsMenuController : MonoBehaviour
         UpdateSubtitleControls();
     }
 
+    private void StepAudioDelay(float deltaSeconds)
+    {
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        if (_playbackService == null)
+            return;
+
+        _playbackService.SetAudioDelaySeconds(_playbackService.AudioDelaySeconds + deltaSeconds);
+        UpdateAudioDelayControl();
+    }
+
+    private void ApplyAudioDelayFromInput(string value)
+    {
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+        if (_playbackService == null)
+            return;
+
+        if (TryParseFloat(value, out float seconds))
+            _playbackService.SetAudioDelaySeconds(SnapToStep(seconds, 0.5f));
+        UpdateAudioDelayControl();
+    }
+
     private void StepPlaybackRate(float delta)
     {
         float current = _playbackService != null ? VlcPlaybackBridge.GetPlaybackRate() : 1f;
@@ -1268,13 +1296,6 @@ public class SettingsMenuController : MonoBehaviour
         ApplyVideoAspectRatio(GetVideoAspectRatioOption(index));
     }
 
-    private void ToggleMixToMono()
-    {
-        _mixToMonoEnabled = !_mixToMonoEnabled;
-        VlcPlaybackBridge.SetAudioChannelMode(_mixToMonoEnabled ? AudioChannelMonoValue : AudioChannelStereoValue);
-        UpdateMixToMonoSwitch();
-    }
-
     private void ToggleAudioBoost()
     {
         bool enabled = !VlcPlaybackBridge.IsAudioBoostEnabled();
@@ -1287,9 +1308,10 @@ public class SettingsMenuController : MonoBehaviour
         SetSwitchButtonState(_audioBoostSwitchButton, VlcPlaybackBridge.IsAudioBoostEnabled());
     }
 
-    private void UpdateMixToMonoSwitch()
+    private void UpdateAudioDelayControl()
     {
-        SetSwitchButtonState(_mixToMonoSwitchButton, _mixToMonoEnabled);
+        if (_audioDelayStepper != null)
+            _audioDelayStepper.SetValueWithoutNotify(FormatSignedSeconds(_playbackService != null ? _playbackService.AudioDelaySeconds : 0f));
     }
 
     private void UpdateSubtitleControls()
@@ -1343,8 +1365,12 @@ public class SettingsMenuController : MonoBehaviour
             return;
 
         button.interactable = visible;
-        if (button.transform.parent != null)
-            button.transform.parent.gameObject.SetActive(visible);
+        Transform valueColumn = button.transform.parent;
+        Transform row = valueColumn != null ? valueColumn.parent : null;
+        if (row != null)
+            row.gameObject.SetActive(visible);
+        else if (valueColumn != null)
+            valueColumn.gameObject.SetActive(visible);
     }
 
     private void UpdateVideoLayoutSelection()

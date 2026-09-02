@@ -1154,6 +1154,48 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
+    public static void SetAudioDelayMicroseconds(long delayUs)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                bridge.CallStatic("setAudioDelay", delayUs);
+                Debug.Log($"[VlcPlaybackBridge] SetAudioDelayMicroseconds called with delayUs={delayUs}");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetAudioDelayMicroseconds failed: {e.Message}");
+        }
+#else
+        Debug.LogWarning("[VlcPlaybackBridge] SetAudioDelayMicroseconds is only supported on Android device.");
+#endif
+    }
+
+    public static long GetAudioDelayMicroseconds()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+            {
+                long delayUs = bridge.CallStatic<long>("getAudioDelay");
+                Debug.Log($"[VlcPlaybackBridge] GetAudioDelayMicroseconds returned delayUs={delayUs}");
+                return delayUs;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] GetAudioDelayMicroseconds failed: {e.Message}");
+            return 0L;
+        }
+#else
+        return 0L;
+#endif
+    }
+
     public static void OpenSubtitlePicker()
     {
         Debug.Log("[VlcPlaybackBridge] OpenSubtitlePicker entry");
@@ -1206,46 +1248,6 @@ public class VlcPlaybackBridge : MonoBehaviour
 #else
         Debug.LogWarning("[VlcPlaybackBridge] SetVideoScaleOrdinal is only supported on Android device.");
 #endif
-    }
-
-    public static void SetAudioChannelMode(string mode)
-    {
-#if UNITY_ANDROID && !UNITY_EDITOR
-        try
-        {
-            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
-            {
-                bridge.CallStatic("setAudioChannelMode", mode);
-                Debug.Log($"[VlcPlaybackBridge] SetAudioChannelMode called with mode: {mode}");
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[VlcPlaybackBridge] SetAudioChannelMode failed: {e.Message}");
-        }
-#else
-        Debug.LogWarning("[VlcPlaybackBridge] SetAudioChannelMode is only supported on Android device.");
-#endif
-    }
-
-    public static bool ShouldMixAudioToMono()
-    {
-#if UNITY_ANDROID && !UNITY_EDITOR
-        try
-        {
-            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
-            {
-                return bridge.CallStatic<bool>("shouldMixAudioToMono");
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[VlcPlaybackBridge] ShouldMixAudioToMono failed: {e.Message}");
-        }
-#else
-        Debug.LogWarning("[VlcPlaybackBridge] ShouldMixAudioToMono is only supported on Android device.");
-#endif
-        return false;
     }
 
     public static bool IsAudioBoostEnabled()

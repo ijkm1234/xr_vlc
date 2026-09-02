@@ -25,7 +25,6 @@ namespace XRVLC.Localization
         public const string SettingsSectionShortcuts = "settings.section.shortcuts";
         public const string SettingsSectionSubtitle = "settings.section.subtitle";
         public const string SettingsSectionVideoScale = "settings.section.video_scale";
-        public const string SettingsSectionAudioChannel = "settings.section.audio_channel";
         public const string SettingsGestureInfoTooltip = "settings.gesture.info_tooltip";
         public const string SettingsSeekStep = "settings.row.seek_step";
         public const string SettingsLeftStickClick = "settings.shortcut.left_stick_click";
@@ -52,8 +51,7 @@ namespace XRVLC.Localization
         public const string SettingsVideoScaleFillCrop = "settings.video_scale.fill_crop";
         public const string SettingsVideoScaleOriginal = "settings.video_scale.original";
         public const string SettingsAudioBoost = "settings.audio.boost";
-        public const string SettingsAudioStereo = "settings.audio.stereo";
-        public const string SettingsAudioMono = "settings.audio.mono";
+        public const string SettingsAudioDelay = "settings.audio.delay";
 
         public const string ShortcutNone = "shortcut.action.none";
         public const string ShortcutToggle2xSpeed = "shortcut.action.toggle_2x_speed";
@@ -115,7 +113,6 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsSectionShortcuts] = "Controller shortcuts",
             [XrUiTextKey.SettingsSectionSubtitle] = "Subtitles",
             [XrUiTextKey.SettingsSectionVideoScale] = "Video scaling",
-            [XrUiTextKey.SettingsSectionAudioChannel] = "Audio output",
             [XrUiTextKey.SettingsGestureInfoTooltip] =
                 "Stick left/right: seek backward/forward\n" +
                 "Hold stick left/right: rewind/fast-forward 30s\n" +
@@ -148,8 +145,7 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsVideoScaleFillCrop] = "Fill crop",
             [XrUiTextKey.SettingsVideoScaleOriginal] = "Original",
             [XrUiTextKey.SettingsAudioBoost] = "Volume boost",
-            [XrUiTextKey.SettingsAudioStereo] = "Stereo",
-            [XrUiTextKey.SettingsAudioMono] = "Mix to mono",
+            [XrUiTextKey.SettingsAudioDelay] = "Audio delay (s)",
 
             [XrUiTextKey.ShortcutNone] = "None",
             [XrUiTextKey.ShortcutToggle2xSpeed] = "Toggle 2x speed",
@@ -204,7 +200,6 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsSectionShortcuts] = "手柄快捷键",
             [XrUiTextKey.SettingsSectionSubtitle] = "字幕",
             [XrUiTextKey.SettingsSectionVideoScale] = "画面拉伸裁剪",
-            [XrUiTextKey.SettingsSectionAudioChannel] = "声道输出",
             [XrUiTextKey.SettingsGestureInfoTooltip] =
                 "摇杆左右：步进/步退\n" +
                 "摇杆左右长按：30s 快进/快退\n" +
@@ -237,8 +232,7 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsVideoScaleFillCrop] = "填充裁剪",
             [XrUiTextKey.SettingsVideoScaleOriginal] = "原始",
             [XrUiTextKey.SettingsAudioBoost] = "音量增益",
-            [XrUiTextKey.SettingsAudioStereo] = "立体声",
-            [XrUiTextKey.SettingsAudioMono] = "混合为单声道",
+            [XrUiTextKey.SettingsAudioDelay] = "音轨延迟（s）",
 
             [XrUiTextKey.ShortcutNone] = "无操作",
             [XrUiTextKey.ShortcutToggle2xSpeed] = "切换 2x 速度",

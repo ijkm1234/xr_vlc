@@ -10,6 +10,10 @@ using XRVLC.Infrastructure.Pico;
 public class XRRecenterOnStart : MonoBehaviour
 {
     const float TrackingWaitTimeoutSeconds = 3f;
+    const int RequiredSynchronizedCameraPoseFrames = 2;
+    const float CameraPositionMatchToleranceMeters = 0.05f;
+    const float CameraRotationMatchToleranceDegrees = 5f;
+    const float WorldForwardAlignmentToleranceDegrees = 2f;
 
     XROrigin m_XROrigin;
     Coroutine m_StartupRecenterCoroutine;
@@ -56,32 +60,70 @@ public class XRRecenterOnStart : MonoBehaviour
     {
         float waitStartedAt = Time.realtimeSinceStartup;
         bool xrOriginInitialized = false;
-        Debug.Log("[XRRecenterOnStart] Waiting for XROrigin initialization and valid HMD tracking.");
+        bool xrOriginInitializationReported = false;
+        bool sessionFocused = false;
+        bool cameraPoseSynchronized = false;
+        int synchronizedCameraPoseFrames = 0;
+        Debug.Log(
+            "[XRRecenterOnStart] Waiting for focused XR session, XROrigin initialization, " +
+            "and synchronized HMD camera pose.");
 
         while (Time.realtimeSinceStartup - waitStartedAt < TrackingWaitTimeoutSeconds)
         {
-            if (!xrOriginInitialized)
+            xrOriginInitialized = IsXrOriginInitialized();
+            if (xrOriginInitialized && !xrOriginInitializationReported)
             {
-                xrOriginInitialized = IsXrOriginInitialized();
-                if (xrOriginInitialized)
-                {
-                    ColdStartSplashOverlay.MarkXrOriginInitialized();
-                    Debug.Log(
-                        $"[XRRecenterOnStart] XROrigin initialized with tracking mode " +
-                        $"{m_XROrigin.CurrentTrackingOriginMode}.");
-                }
+                xrOriginInitializationReported = true;
+                ColdStartSplashOverlay.MarkXrOriginInitialized();
+                Debug.Log(
+                    $"[XRRecenterOnStart] XROrigin initialized with tracking mode " +
+                    $"{m_XROrigin.CurrentTrackingOriginMode}.");
             }
 
-            if (xrOriginInitialized && IsHeadTrackingValid() && TryRecenter())
+            sessionFocused = PicoSessionEvents.IsFocused;
+            bool headTrackingValid = TryGetValidHeadPose(
+                out Vector3 headLocalPosition,
+                out Quaternion headLocalRotation);
+            cameraPoseSynchronized = headTrackingValid &&
+                IsCameraPoseSynchronized(headLocalPosition, headLocalRotation);
+
+            if (sessionFocused && xrOriginInitialized && cameraPoseSynchronized)
+                synchronizedCameraPoseFrames++;
+            else
+                synchronizedCameraPoseFrames = 0;
+
+            if (synchronizedCameraPoseFrames < RequiredSynchronizedCameraPoseFrames ||
+                !TryRecenter())
             {
-                m_StartupAlignmentFinished = true;
-                m_StartupRecenterCoroutine = null;
-                ColdStartSplashOverlay.MarkWorldCoordinatesAligned();
-                Debug.Log("[XRRecenterOnStart] HMD tracking is valid; world forward aligned to view yaw.");
-                yield break;
+                yield return null;
+                continue;
             }
 
+            // TrackedPoseDriver 仍会在下一帧写入 Camera transform；等它完成后再确认
+            // 本次对齐没有被首个有效头显 pose 覆盖。
             yield return null;
+
+            sessionFocused = PicoSessionEvents.IsFocused;
+            bool verificationTrackingValid = TryGetValidHeadPose(
+                out headLocalPosition,
+                out headLocalRotation);
+            cameraPoseSynchronized = verificationTrackingValid &&
+                IsCameraPoseSynchronized(headLocalPosition, headLocalRotation);
+
+            if (!sessionFocused || !IsXrOriginInitialized() || !cameraPoseSynchronized ||
+                !IsWorldForwardAligned())
+            {
+                synchronizedCameraPoseFrames = 0;
+                continue;
+            }
+
+            m_StartupAlignmentFinished = true;
+            m_StartupRecenterCoroutine = null;
+            ColdStartSplashOverlay.MarkWorldCoordinatesAligned();
+            Debug.Log(
+                "[XRRecenterOnStart] Focused XR session and synchronized camera pose confirmed; " +
+                "world forward aligned to view yaw.");
+            yield break;
         }
 
         m_StartupAlignmentFinished = true;
@@ -90,9 +132,13 @@ public class XRRecenterOnStart : MonoBehaviour
             ColdStartSplashOverlay.MarkXrOriginInitializationTimedOut();
         ColdStartSplashOverlay.MarkWorldAlignmentTimedOut();
         Debug.LogWarning(
-            $"[XRRecenterOnStart] XROrigin initialization or HMD tracking did not become valid within " +
+            $"[XRRecenterOnStart] Focused XR session, XROrigin initialization, or synchronized " +
+            $"HMD camera pose did not become valid within " +
             $"{TrackingWaitTimeoutSeconds:0.#} seconds; startup recenter skipped. " +
-            $"xrOriginInitialized={xrOriginInitialized}, trackingMode={m_XROrigin.CurrentTrackingOriginMode}.");
+            $"sessionFocused={sessionFocused}, xrOriginInitialized={xrOriginInitialized}, " +
+            $"cameraPoseSynchronized={cameraPoseSynchronized}, " +
+            $"synchronizedFrames={synchronizedCameraPoseFrames}, " +
+            $"trackingMode={m_XROrigin.CurrentTrackingOriginMode}.");
     }
 
     bool IsXrOriginInitialized()
@@ -114,8 +160,11 @@ public class XRRecenterOnStart : MonoBehaviour
         };
     }
 
-    static bool IsHeadTrackingValid()
+    static bool TryGetValidHeadPose(out Vector3 position, out Quaternion rotation)
     {
+        position = Vector3.zero;
+        rotation = Quaternion.identity;
+
         InputDevice headDevice = InputDevices.GetDeviceAtXRNode(XRNode.Head);
         if (!headDevice.isValid)
             return false;
@@ -131,8 +180,35 @@ public class XRRecenterOnStart : MonoBehaviour
         if ((trackingState & requiredTracking) != requiredTracking)
             return false;
 
-        return headDevice.TryGetFeatureValue(CommonUsages.devicePosition, out _) &&
-            headDevice.TryGetFeatureValue(CommonUsages.deviceRotation, out _);
+        return headDevice.TryGetFeatureValue(CommonUsages.devicePosition, out position) &&
+            headDevice.TryGetFeatureValue(CommonUsages.deviceRotation, out rotation);
+    }
+
+    bool IsCameraPoseSynchronized(Vector3 headLocalPosition, Quaternion headLocalRotation)
+    {
+        Camera cam = m_XROrigin?.Camera;
+        if (cam == null)
+            return false;
+
+        Transform cameraTransform = cam.transform;
+        float positionError = Vector3.Distance(cameraTransform.localPosition, headLocalPosition);
+        float rotationError = Quaternion.Angle(cameraTransform.localRotation, headLocalRotation);
+        return positionError <= CameraPositionMatchToleranceMeters &&
+            rotationError <= CameraRotationMatchToleranceDegrees;
+    }
+
+    bool IsWorldForwardAligned()
+    {
+        Camera cam = m_XROrigin?.Camera;
+        if (cam == null)
+            return false;
+
+        Vector3 projectedForward = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up);
+        if (projectedForward.sqrMagnitude < 0.0001f)
+            return false;
+
+        return Vector3.Angle(projectedForward, Vector3.forward) <=
+            WorldForwardAlignmentToleranceDegrees;
     }
 
     // 长按 Home：OS 已重置追踪空间，XROrigin 归零即对齐

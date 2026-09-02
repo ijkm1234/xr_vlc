@@ -28,6 +28,7 @@ namespace XRVLC.Media
         public SubtitleRenderMode SubtitleRenderMode { get; private set; } = SubtitleRenderMode.Spatial;
         public bool RenderSubtitlesOutsideScreen { get; private set; }
         public float SubtitleDelaySeconds { get; private set; }
+        public float AudioDelaySeconds { get; private set; }
         public VideoGeometrySelection CurrentGeometrySelection => _currentGeometrySelection;
         public ChromaKeySettings CurrentChromaKeySettings => _chromaKeySettings;
         public VideoScaleMode CurrentVideoScaleMode { get; private set; } = VideoScaleMode.Fit;
@@ -1922,6 +1923,21 @@ namespace XRVLC.Media
             VlcPlaybackBridge.SetSubtitleDelayMicroseconds((long)(snapped * 1000000f));
         }
 
+        public void SetAudioDelaySeconds(float seconds)
+        {
+            if (float.IsNaN(seconds) || float.IsInfinity(seconds))
+                seconds = 0f;
+
+            float snapped = Mathf.Round(seconds * 2f) * 0.5f;
+            AudioDelaySeconds = snapped;
+            VlcPlaybackBridge.SetAudioDelayMicroseconds((long)(snapped * 1000000f));
+        }
+
+        public void RefreshAudioDelayFromVlc()
+        {
+            AudioDelaySeconds = VlcPlaybackBridge.GetAudioDelayMicroseconds() / 1000000f;
+        }
+
         /// <summary>
         /// 优先恢复关闭前的字幕轨；如果不可用，则选择第一个有效字幕轨。
         /// </summary>
@@ -1944,7 +1960,10 @@ namespace XRVLC.Media
             return fallback;
         }
 
-        public void SetAudioDelay(long delayMs) { /* Audio delay is not exposed in the Unity settings surface. */ }
+        public void SetAudioDelay(long delayMs)
+        {
+            SetAudioDelaySeconds(delayMs / 1000f);
+        }
         public void SetSubtitleDelay(long delayMs)
         {
             SetSubtitleDelaySeconds(delayMs / 1000f);
