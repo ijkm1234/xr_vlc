@@ -33,6 +33,8 @@ namespace XRVLC.Media
         public ChromaKeySettings CurrentChromaKeySettings => _chromaKeySettings;
         public VideoScaleMode CurrentVideoScaleMode { get; private set; } = VideoScaleMode.Fit;
         public VideoAspectRatio CurrentVideoAspectRatio { get; private set; } = VideoAspectRatio.Source;
+        public int CurrentVideoRotationDegrees { get; private set; }
+        public bool IsVideoRotationSupported => VideoRotation.IsSupported(_currentGeometrySelection.Projection);
         
         public MediaWrapper CurrentMedia { get; private set; }
 
@@ -173,6 +175,9 @@ namespace XRVLC.Media
 
             CurrentVideoScaleMode = VideoScaleMode.Fit;
             CurrentVideoAspectRatio = PlaybackUiSettingsService.LoadVideoAspectRatio();
+            CurrentVideoRotationDegrees = 0;
+            VlcPlaybackBridge.SetVideoSurfaceRotation(CurrentVideoRotationDegrees);
+            videoScreen.SetVideoRotation(CurrentVideoRotationDegrees);
             videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
 
             _geometryService = CreateGeometryService(videoScreen);
@@ -318,6 +323,7 @@ namespace XRVLC.Media
 
             _activeMediaRequestId = request.MediaRequestId;
             CurrentMedia = request.Media;
+            ApplyVideoRotation(0);
             CurrentMedia.DurationMs = Math.Max(0L, result.duration);
             CurrentMedia.Projection = result.projection switch
             {
@@ -426,7 +432,7 @@ namespace XRVLC.Media
                 return;
             }
 
-            _currentGeometrySelection = ResolveRequestedGeometry();
+            ApplyRequestedGeometrySelection();
             if (_geometryBindingCoroutine != null)
             {
                 _hasPendingRebuildLayer = true;
@@ -465,7 +471,7 @@ namespace XRVLC.Media
                 return;
             }
 
-            _currentGeometrySelection = ResolveRequestedGeometry();
+            ApplyRequestedGeometrySelection();
             _geometryBindingCoroutine = StartCoroutine(ChangeLayer(CurrentVideoSize));
         }
 
@@ -483,7 +489,7 @@ namespace XRVLC.Media
         private IEnumerator RebuildLayer(VlcVideoSize videoSize, long mediaRequestId)
         {
             CancelNativeSubtitleSurfaceCoroutine();
-            _currentGeometrySelection = ResolveRequestedGeometry();
+            ApplyRequestedGeometrySelection();
             VideoLayerSpec layerSpec = CreateVideoLayerSpec(videoSize, _currentGeometrySelection);
             bool rebuildInput = VideoLayerPlanner.NeedsInputRebuild(
                 _boundInputLayerSpec,
@@ -588,7 +594,7 @@ namespace XRVLC.Media
         private IEnumerator ChangeLayer(VlcVideoSize videoSize)
         {
             CancelNativeSubtitleSurfaceCoroutine();
-            _currentGeometrySelection = ResolveRequestedGeometry();
+            ApplyRequestedGeometrySelection();
             VideoLayerSpec layerSpec = CreateVideoLayerSpec(videoSize, _currentGeometrySelection);
             bool rebuildOutput = VideoLayerPlanner.NeedsOutputRebuild(
                 _boundOutputLayerSpec,
@@ -1121,6 +1127,7 @@ namespace XRVLC.Media
             videoScreen = screen;
             if (videoScreen != null)
             {
+                videoScreen.SetVideoRotation(CurrentVideoRotationDegrees);
                 videoScreen.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
                 _geometryService = CreateGeometryService(videoScreen);
                 videoScreen.RebuildLayer(UseHardwareDecoding);
@@ -1304,6 +1311,14 @@ namespace XRVLC.Media
             videoScreen?.SetVideoLayout(CurrentVideoScaleMode, CurrentVideoAspectRatio);
         }
 
+        public void SetVideoRotation(int degrees)
+        {
+            int nextRotation = IsVideoRotationSupported
+                ? VideoRotation.NormalizeToQuarterTurn(degrees)
+                : 0;
+            ApplyVideoRotation(nextRotation);
+        }
+
         public void SetManualVideoGeometry(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
         {
             if (projection != VideoProjection.Cylinder)
@@ -1317,6 +1332,7 @@ namespace XRVLC.Media
 
             _hasManualGeometryOverride = true;
             _manualGeometrySelection = nextGeometry;
+            ResetVideoRotationForProjectionTransition(_currentGeometrySelection.Projection, projection);
 
             if (videoScreen == null)
                 return;
@@ -1340,6 +1356,32 @@ namespace XRVLC.Media
                 stereo,
                 curveMode,
                 _fisheyeProjectionFormula);
+        }
+
+        private void ApplyRequestedGeometrySelection()
+        {
+            VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
+            ResetVideoRotationForProjectionTransition(
+                _currentGeometrySelection.Projection,
+                nextGeometry.Projection);
+            _currentGeometrySelection = nextGeometry;
+        }
+
+        private void ResetVideoRotationForProjectionTransition(
+            VideoProjection currentProjection,
+            VideoProjection nextProjection)
+        {
+            if (VideoRotation.IsSupported(currentProjection) == VideoRotation.IsSupported(nextProjection))
+                return;
+
+            ApplyVideoRotation(0);
+        }
+
+        private void ApplyVideoRotation(int degrees)
+        {
+            CurrentVideoRotationDegrees = VideoRotation.NormalizeToQuarterTurn(degrees);
+            VlcPlaybackBridge.SetVideoSurfaceRotation(CurrentVideoRotationDegrees);
+            videoScreen?.SetVideoRotation(CurrentVideoRotationDegrees);
         }
 
         public void SetFisheyeProjectionFormula(FisheyeProjectionFormula formula)

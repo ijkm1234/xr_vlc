@@ -21,7 +21,7 @@ VLC/libVLC 媒体栈。
 
 | Dependency | Pinned version |
 | --- | --- |
-| VLC for Android fork | tag `v0.0.1` (`485e54231bc178fa0af52fad10bb001738f64f7b`) |
+| VLC for Android fork | tag `v0.0.1` (`9e95690a3106aa9af67a82375a78810c210ccbb5`) |
 | libvlcjni fork | tag `v0.0.1` (`1e0f2fa5114700381e61e90d796f7edf86a733da`) |
 | VLC/libVLC fork | tag `v0.0.1` (`fef678a7fcf79f717fd909a43cf737f415f4fa9e`) |
 
