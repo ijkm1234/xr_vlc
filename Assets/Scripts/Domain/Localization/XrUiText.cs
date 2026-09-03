@@ -46,6 +46,7 @@ namespace XRVLC.Localization
         public const string SettingsPlaybackRate = "settings.row.playback_rate";
         public const string SettingsAspectRatio = "settings.row.aspect_ratio";
         public const string SettingsAspectRatioAuto = "settings.aspect_ratio.auto";
+        public const string SettingsVideoRotation = "settings.row.video_rotation";
         public const string SettingsVideoScaleFit = "settings.video_scale.fit";
         public const string SettingsVideoScaleStretch = "settings.video_scale.stretch";
         public const string SettingsVideoScaleFillCrop = "settings.video_scale.fill_crop";
@@ -140,6 +141,7 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsPlaybackRate] = "Speed",
             [XrUiTextKey.SettingsAspectRatio] = "Aspect ratio",
             [XrUiTextKey.SettingsAspectRatioAuto] = "Auto",
+            [XrUiTextKey.SettingsVideoRotation] = "Rotate video (°)",
             [XrUiTextKey.SettingsVideoScaleFit] = "Fit",
             [XrUiTextKey.SettingsVideoScaleStretch] = "Stretch",
             [XrUiTextKey.SettingsVideoScaleFillCrop] = "Fill crop",
@@ -227,6 +229,7 @@ namespace XRVLC.Localization
             [XrUiTextKey.SettingsPlaybackRate] = "倍速",
             [XrUiTextKey.SettingsAspectRatio] = "宽高比",
             [XrUiTextKey.SettingsAspectRatioAuto] = "自动",
+            [XrUiTextKey.SettingsVideoRotation] = "旋转画面（°）",
             [XrUiTextKey.SettingsVideoScaleFit] = "适应",
             [XrUiTextKey.SettingsVideoScaleStretch] = "拉伸",
             [XrUiTextKey.SettingsVideoScaleFillCrop] = "填充裁剪",

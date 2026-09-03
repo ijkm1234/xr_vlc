@@ -55,7 +55,11 @@ namespace XRVLC
                 if ((_currentProjection == VideoProjection.Flat || _currentProjection == VideoProjection.Cylinder)
                     && _lastVisibleWindowSize.x > 0.001f
                     && _lastVisibleWindowSize.y > 0.001f)
-                    return _lastVisibleWindowSize;
+                {
+                    return VideoRotation.UsesSideEdgeAsBottom(_videoRotationDegrees)
+                        ? new Vector2(_lastVisibleWindowSize.y, _lastVisibleWindowSize.x)
+                        : _lastVisibleWindowSize;
+                }
 
                 Transform reference = videoAnchor != null ? videoAnchor : backgroundBoard;
                 if (reference == null) return new Vector2(16f, 9f);
@@ -83,6 +87,7 @@ namespace XRVLC
         private FlatVideoCurveMode _currentCurveMode = FlatVideoCurveMode.None;
         private VideoScaleMode _videoScaleMode = VideoScaleMode.Fit;
         private VideoAspectRatio _videoAspectRatio = VideoAspectRatio.Source;
+        private int _videoRotationDegrees;
         private VideoScreenTransformService _transformService;
         private float _flatZoomScale = 1f;
         private uint _lastVideoWidth;
@@ -145,6 +150,23 @@ namespace XRVLC
                 FitVideoSize(_lastVideoWidth, _lastVideoHeight, _lastBackgroundRatio);
         }
 
+        public void SetVideoRotation(int degrees)
+        {
+            _videoRotationDegrees = VideoRotation.NormalizeToQuarterTurn(degrees);
+
+            if (videoAnchor == null || IsImmersiveProjection)
+                return;
+
+            if (_lastVideoWidth > 0 && _lastVideoHeight > 0)
+                FitVideoSize(_lastVideoWidth, _lastVideoHeight, _lastBackgroundRatio);
+            else
+            {
+                PositionVideoAnchorForFlatProjection();
+                RefreshVideoAlphaHole();
+                RefreshFlatSubtitleLayerGeometry();
+            }
+        }
+
         /// <summary>
         /// 调整视频锚点的缩放以适配视频比例和背景板
         /// </summary>
@@ -170,6 +192,12 @@ namespace XRVLC
             VideoLayoutResult layout = CalculateFlatVideoLayout(backgroundSize, targetRatio);
             Vector2 renderSize = layout.RenderSize * _flatZoomScale;
             Vector2 visibleSize = layout.VisibleSize * _flatZoomScale;
+            bool sideEdgeAsBottom = VideoRotation.UsesSideEdgeAsBottom(_videoRotationDegrees);
+            if (sideEdgeAsBottom)
+            {
+                renderSize = new Vector2(renderSize.y, renderSize.x);
+                visibleSize = new Vector2(visibleSize.y, visibleSize.x);
+            }
             _lastVisibleWindowSize = visibleSize;
 
             if (_currentProjection == VideoProjection.Cylinder)
@@ -180,7 +208,7 @@ namespace XRVLC
                 PositionVideoAnchorForFlatProjection();
                 RefreshVideoAlphaHole();
                 RefreshFlatSubtitleLayerGeometry();
-                Debug.Log($"[VideoScreen] FitVideoSize 曲面: render={renderSize}, visible={visibleSize}, targetRatio={targetRatio}, scaleMode={_videoScaleMode}, aspect={_videoAspectRatio}, radius={cylinderRadius}, centralAngle={cylinderCentralAngle}, PICO scale={videoAnchor.localScale}");
+                Debug.Log($"[VideoScreen] FitVideoSize 曲面: render={renderSize}, visible={visibleSize}, targetRatio={targetRatio}, scaleMode={_videoScaleMode}, aspect={_videoAspectRatio}, rotation={_videoRotationDegrees}, sideEdgeAsBottom={sideEdgeAsBottom}, radius={cylinderRadius}, centralAngle={cylinderCentralAngle}, PICO scale={videoAnchor.localScale}");
                 return;
             }
 
@@ -954,12 +982,17 @@ namespace XRVLC
 
             if (attachToVideoSurface && _currentProjection == VideoProjection.Cylinder)
             {
+                float width = GetWorldAxisLength(videoAnchor, Vector3.right);
+                float height = GetWorldAxisLength(videoAnchor, Vector3.up);
+                if (VideoRotation.UsesSideEdgeAsBottom(_videoRotationDegrees))
+                    (width, height) = (height, width);
+
                 return new SubtitleLayerGeometry(
                     videoAnchor.position,
                     rotation,
                     new Vector3(
-                        GetWorldAxisLength(videoAnchor, Vector3.right),
-                        GetWorldAxisLength(videoAnchor, Vector3.up),
+                        width,
+                        height,
                         GetWorldAxisLength(videoAnchor, Vector3.forward)));
             }
 

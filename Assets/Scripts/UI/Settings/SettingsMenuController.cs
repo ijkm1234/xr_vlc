@@ -139,6 +139,7 @@ public class SettingsMenuController : MonoBehaviour
     private XrStepperControl _playbackRateStepper;
     private XrStepperControl _seekSecondsStepper;
     private XrDropdown _videoAspectRatioDropdown;
+    private XrStepperControl _videoRotationStepper;
     private VideoAspectRatio _currentVideoAspectRatio;
 
     public void Bind(
@@ -378,6 +379,14 @@ public class SettingsMenuController : MonoBehaviour
     private void BuildVideoTab(GameObject root)
     {
         _videoAspectRatioDropdown = CreateVideoAspectRatioDropdown(root.transform);
+        _videoRotationStepper = CreateStepperRow(
+            root.transform,
+            "VideoRotationRow",
+            XrUiText.Get(XrUiTextKey.SettingsVideoRotation),
+            "0",
+            () => StepVideoRotation(-VideoRotation.StepDegrees),
+            () => StepVideoRotation(VideoRotation.StepDegrees),
+            ApplyVideoRotationFromInput);
     }
 
     private void BuildAudioTab(GameObject root)
@@ -1100,6 +1109,8 @@ public class SettingsMenuController : MonoBehaviour
             UpdateAudioBoostSwitch();
             UpdateAudioDelayControl();
         }
+        if (tab == SettingsTab.Video)
+            UpdateVideoLayoutSelection();
     }
 
     private void RefreshAllSelections()
@@ -1296,6 +1307,31 @@ public class SettingsMenuController : MonoBehaviour
         ApplyVideoAspectRatio(GetVideoAspectRatioOption(index));
     }
 
+    private void StepVideoRotation(int deltaDegrees)
+    {
+        int currentDegrees = _playbackService != null
+            ? _playbackService.CurrentVideoRotationDegrees
+            : 0;
+        ApplyVideoRotation(currentDegrees + deltaDegrees);
+    }
+
+    private void ApplyVideoRotationFromInput(string value)
+    {
+        if (TryParseInt(value, out int degrees))
+            ApplyVideoRotation(degrees);
+        else
+            UpdateVideoRotationControl();
+    }
+
+    private void ApplyVideoRotation(int degrees)
+    {
+        if (_playbackService == null)
+            _playbackService = FindAnyObjectByType<XRVLC.Media.PlaybackService>();
+
+        _playbackService?.SetVideoRotation(VideoRotation.NormalizeToQuarterTurn(degrees));
+        UpdateVideoRotationControl();
+    }
+
     private void ToggleAudioBoost()
     {
         bool enabled = !VlcPlaybackBridge.IsAudioBoostEnabled();
@@ -1377,6 +1413,22 @@ public class SettingsMenuController : MonoBehaviour
     {
         if (_videoAspectRatioDropdown != null)
             _videoAspectRatioDropdown.SetValueWithoutNotify(GetVideoAspectRatioIndex(_currentVideoAspectRatio));
+        UpdateVideoRotationControl();
+    }
+
+    private void UpdateVideoRotationControl()
+    {
+        if (_videoRotationStepper == null)
+            return;
+
+        int degrees = _playbackService != null
+            ? _playbackService.CurrentVideoRotationDegrees
+            : 0;
+        bool interactable = _playbackService == null || _playbackService.IsVideoRotationSupported;
+        _videoRotationStepper.decrementButton.interactable = interactable;
+        _videoRotationStepper.incrementButton.interactable = interactable;
+        _videoRotationStepper.InputField.interactable = interactable;
+        _videoRotationStepper.SetValueWithoutNotify(degrees.ToString(CultureInfo.InvariantCulture));
     }
 
     private static List<XrDropdownItemData> CreateSubtitleFontItems()

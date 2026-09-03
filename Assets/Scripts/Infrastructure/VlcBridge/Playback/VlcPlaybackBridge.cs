@@ -405,6 +405,21 @@ public class VlcPlaybackBridge : MonoBehaviour
 #endif
     }
 
+    public static void SetVideoSurfaceRotation(int degrees)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using (AndroidJavaClass bridge = new AndroidJavaClass(BridgeClassName))
+                bridge.CallStatic("setVideoSurfaceRotation", degrees);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"[VlcPlaybackBridge] SetVideoSurfaceRotation failed: {e.Message}");
+        }
+#endif
+    }
+
     public static void SetVideoSurfaceProcessingParameters(
         FisheyeProjectionFormula fisheyeProjectionFormula,
         Color keyColor,
