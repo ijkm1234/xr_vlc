@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using UnityEditor;
+using UnityEditor.Android;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -12,6 +14,8 @@ public static class CommandLineAndroidBuild
     private const string KeystorePasswordVariable = "XRVLC_KEYSTORE_PASS";
     private const string KeyAliasVariable = "XRVLC_KEY_ALIAS";
     private const string KeyAliasPasswordVariable = "XRVLC_KEY_ALIAS_PASS";
+    internal const string DefaultRegion = "global";
+    internal const string ChinaRegion = "region_cn";
 
     private sealed class BuildEnvironmentConfiguration
     {
@@ -28,6 +32,7 @@ public static class CommandLineAndroidBuild
     public static void BuildDebug()
     {
         BuildEnvironmentConfiguration environment = ResolveBuildEnvironment();
+        string region = ResolveBuildRegion();
         string outputPath = GetArgument("-outputPath") ?? "Builds/xr_vlc-debug.apk";
         EnsureOutputDirectory(outputPath);
         EnsureVlcAarVariant("debug");
@@ -38,7 +43,8 @@ public static class CommandLineAndroidBuild
         try
         {
             Console.WriteLine(
-                $"Android build environment: {environment.Name}, product name: {environment.ProductName}");
+                $"Android build environment: {environment.Name}, region: {region}, " +
+                $"product name: {environment.ProductName}");
 
             EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
             EditorUserBuildSettings.development = true;
@@ -76,6 +82,7 @@ public static class CommandLineAndroidBuild
     public static void BuildRelease()
     {
         BuildEnvironmentConfiguration environment = ResolveBuildEnvironment();
+        string region = ResolveBuildRegion();
         string outputPath = GetArgument("-outputPath") ?? "Builds/xr_vlc-release.apk";
         string outputExtension = Path.GetExtension(outputPath);
         bool buildAppBundle;
@@ -140,7 +147,8 @@ public static class CommandLineAndroidBuild
 
             Console.WriteLine(
                 $"Android release build environment: {environment.Name}, " +
-                $"product name: {environment.ProductName}, format: {(buildAppBundle ? "AAB" : "APK")}, " +
+                $"region: {region}, product name: {environment.ProductName}, " +
+                $"format: {(buildAppBundle ? "AAB" : "APK")}, " +
                 $"keystore: {keystorePath}, alias: {keyAlias}");
 
             BuildPlayerOptions buildOptions = new BuildPlayerOptions
@@ -257,6 +265,22 @@ public static class CommandLineAndroidBuild
         }
     }
 
+    internal static string ResolveBuildRegion()
+    {
+        string region = GetArgument("-region") ?? DefaultRegion;
+        switch (region.Trim().ToLowerInvariant())
+        {
+            case DefaultRegion:
+                return DefaultRegion;
+            case ChinaRegion:
+                return ChinaRegion;
+            default:
+                throw new ArgumentException(
+                    $"Unsupported build region '{region}'. Supported regions: " +
+                    $"{DefaultRegion}, {ChinaRegion}.");
+        }
+    }
+
     private static string GetArgument(string name)
     {
         string[] args = Environment.GetCommandLineArgs();
@@ -274,5 +298,45 @@ public static class CommandLineAndroidBuild
         }
 
         return null;
+    }
+}
+
+public sealed class RegionRepositoryUrlAndroidBuild : IPostGenerateGradleAndroidProject
+{
+    private const string ResourceFileName = "xr_about_region_urls.xml";
+
+    private const string ChinaRepositoryUrls = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<resources>
+    <string name=""xr_repository_xr_vlc_url"" translatable=""false"">https://gitee.com/ijkm1234/xr_vlc</string>
+    <string name=""xr_repository_vlc_android_url"" translatable=""false"">https://gitee.com/ijkm1234/vlc_android_for_xr_vlc</string>
+    <string name=""xr_repository_libvlcjni_url"" translatable=""false"">https://gitee.com/ijkm1234/libvlcjni_for_xr_vlc</string>
+    <string name=""xr_repository_vlc_url"" translatable=""false"">https://gitee.com/ijkm1234/vlc_for_xr_vlc</string>
+    <bool name=""xr_region_cn"">true</bool>
+</resources>
+";
+
+    public int callbackOrder => 100;
+
+    public void OnPostGenerateGradleAndroidProject(string path)
+    {
+        string valuesDirectory = Path.Combine(path, "src", "main", "res", "values");
+        string resourcePath = Path.Combine(valuesDirectory, ResourceFileName);
+        string region = CommandLineAndroidBuild.ResolveBuildRegion();
+
+        if (region != CommandLineAndroidBuild.ChinaRegion)
+        {
+            if (File.Exists(resourcePath))
+            {
+                File.Delete(resourcePath);
+            }
+
+            return;
+        }
+
+        Directory.CreateDirectory(valuesDirectory);
+        File.WriteAllText(resourcePath, ChinaRepositoryUrls, new UTF8Encoding(false));
+        Console.WriteLine(
+            $"Android build region {region}: VLC About repository URLs overridden with Gitee links " +
+            "and China-specific About UI enabled.");
     }
 }
