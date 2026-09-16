@@ -1444,20 +1444,44 @@ public class VlcPlaybackBridge : MonoBehaviour
         try
         {
             string[] parts = sizeStr.Split('|');
-            if (parts.Length == 2 || parts.Length == 4)
+            if (parts.Length == 2 || parts.Length == 4 || parts.Length == 8)
             {
-                int width = int.Parse(parts[0], CultureInfo.InvariantCulture);
-                int height = int.Parse(parts[1], CultureInfo.InvariantCulture);
-                int visibleWidth = parts.Length == 4
-                    ? int.Parse(parts[2], CultureInfo.InvariantCulture)
+                bool hasLayoutIdentity = parts.Length == 8;
+                int offset = hasLayoutIdentity ? 2 : 0;
+                long mediaRequestId = hasLayoutIdentity
+                    ? long.Parse(parts[0], CultureInfo.InvariantCulture)
+                    : 0L;
+                long surfaceToken = hasLayoutIdentity
+                    ? long.Parse(parts[1], CultureInfo.InvariantCulture)
+                    : 0L;
+                int width = int.Parse(parts[offset], CultureInfo.InvariantCulture);
+                int height = int.Parse(parts[offset + 1], CultureInfo.InvariantCulture);
+                int visibleWidth = parts.Length == 4 || hasLayoutIdentity
+                    ? int.Parse(parts[offset + 2], CultureInfo.InvariantCulture)
                     : width;
-                int visibleHeight = parts.Length == 4
-                    ? int.Parse(parts[3], CultureInfo.InvariantCulture)
+                int visibleHeight = parts.Length == 4 || hasLayoutIdentity
+                    ? int.Parse(parts[offset + 3], CultureInfo.InvariantCulture)
                     : height;
+                int sarNum = hasLayoutIdentity
+                    ? int.Parse(parts[offset + 4], CultureInfo.InvariantCulture)
+                    : 1;
+                int sarDen = hasLayoutIdentity
+                    ? int.Parse(parts[offset + 5], CultureInfo.InvariantCulture)
+                    : 1;
                 SurfaceDebug(
                     $"layout_unity_message parsed raw={width}x{height} visible={visibleWidth}x{visibleHeight} " +
+                    $"sar={sarNum}/{sarDen} request={mediaRequestId} surfaceToken={surfaceToken} " +
                     $"subscriberPresent={OnVideoSizeChangedEvent != null}");
-                OnVideoSizeChangedEvent?.Invoke(new VlcVideoSize(width, height, visibleWidth, visibleHeight));
+                OnVideoSizeChangedEvent?.Invoke(
+                    new VlcVideoSize(
+                        width,
+                        height,
+                        visibleWidth,
+                        visibleHeight,
+                        sarNum,
+                        sarDen,
+                        mediaRequestId,
+                        surfaceToken));
             }
             else
             {

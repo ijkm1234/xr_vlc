@@ -18,6 +18,10 @@ public class VlcMediaParseResult
     public int visibleWidth;
     /// <summary>解析出的可见内容高度；缺失时使用原始高度。</summary>
     public int visibleHeight;
+    /// <summary>像素宽高比的分子；缺失或无效时按 1 处理。</summary>
+    public int sarNum = 1;
+    /// <summary>像素宽高比的分母；缺失或无效时按 1 处理。</summary>
+    public int sarDen = 1;
     /// <summary>解析出的投影类型，取值约定为 flat、360 或 180。</summary>
     public string projection; // "flat"|"360"|"180"
     /// <summary>解析出的媒体总时长，单位毫秒。</summary>
@@ -28,7 +32,14 @@ public class VlcMediaParseResult
 
     public VlcVideoSize ToVideoSize()
     {
-        return new VlcVideoSize(width, height, visibleWidth, visibleHeight);
+        return new VlcVideoSize(
+            width,
+            height,
+            visibleWidth,
+            visibleHeight,
+            sarNum,
+            sarDen,
+            _mediaRequestId);
     }
 
     internal void SetMediaRequestId(long mediaRequestId)
@@ -39,20 +50,46 @@ public class VlcMediaParseResult
 
 public readonly struct VlcVideoSize
 {
-    public VlcVideoSize(int width, int height, int visibleWidth = 0, int visibleHeight = 0)
+    public VlcVideoSize(
+        int width,
+        int height,
+        int visibleWidth = 0,
+        int visibleHeight = 0,
+        int sarNum = 1,
+        int sarDen = 1,
+        long mediaRequestId = 0L,
+        long surfaceToken = 0L)
     {
         Width = width;
         Height = height;
         VisibleWidth = visibleWidth;
         VisibleHeight = visibleHeight;
+        SarNum = sarNum > 0 ? sarNum : 1;
+        SarDen = sarDen > 0 ? sarDen : 1;
+        MediaRequestId = mediaRequestId;
+        SurfaceToken = surfaceToken;
     }
 
     public int Width { get; }
     public int Height { get; }
     public int VisibleWidth { get; }
     public int VisibleHeight { get; }
+    public int SarNum { get; }
+    public int SarDen { get; }
+    public long MediaRequestId { get; }
+    public long SurfaceToken { get; }
     public int ContentWidth => VisibleWidth > 0 ? VisibleWidth : Width;
     public int ContentHeight => VisibleHeight > 0 ? VisibleHeight : Height;
+    public int DisplayWidth
+    {
+        get
+        {
+            long scaledWidth = (long)ContentWidth * SarNum;
+            long roundedWidth = (scaledWidth + SarDen / 2L) / SarDen;
+            return (int)Math.Max(1L, Math.Min(int.MaxValue, roundedWidth));
+        }
+    }
+    public int DisplayHeight => ContentHeight;
     public bool IsValid => Width > 0 && Height > 0 && ContentWidth > 0 && ContentHeight > 0;
 
     public bool HasSameDimensions(VlcVideoSize other)
@@ -60,6 +97,8 @@ public readonly struct VlcVideoSize
         return Width == other.Width
             && Height == other.Height
             && VisibleWidth == other.VisibleWidth
-            && VisibleHeight == other.VisibleHeight;
+            && VisibleHeight == other.VisibleHeight
+            && SarNum == other.SarNum
+            && SarDen == other.SarDen;
     }
 }

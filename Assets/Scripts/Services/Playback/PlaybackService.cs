@@ -19,7 +19,7 @@ namespace XRVLC.Media
         private const float ShortcutFastRate = 2f;
         private const string SurfaceDebugTag = "XR_SURFACE_DEBUG";
         private const float SurfaceRebuildPauseTimeoutSeconds = 1.5f;
-        private const int CodecBufferAlignmentPixels = 16;
+        private const int MaxCodecPaddingPixels = 64;
         private const uint MaxSubtitleSurfaceEdgePixels = 1920u;
 
         public static PlaybackService Instance { get; private set; }
@@ -61,6 +61,9 @@ namespace XRVLC.Media
         private int _currentHeight = 0;
         private int _currentVisibleWidth = 0;
         private int _currentVisibleHeight = 0;
+        private int _currentSarNum = 1;
+        private int _currentSarDen = 1;
+        private long _currentMediaRequestId;
         private readonly TrackSelectionService _trackSelectionService = new TrackSelectionService();
         private bool _isShortcutFastRate;
         private VideoScreenGeometryService _geometryService;
@@ -73,6 +76,7 @@ namespace XRVLC.Media
         private Coroutine _nativeSubtitleSurfaceCoroutine;
         private long _nextVideoOutputSwitchToken;
         private long _activeVideoOutputSwitchToken;
+        private long _boundVideoLayoutToken;
         private long _activeMediaRequestId;
         private VideoOutputSwitchState _videoOutputSwitchState;
         private string _videoOutputSwitchFailureReason;
@@ -86,11 +90,21 @@ namespace XRVLC.Media
         private bool _hasPendingRebuildLayer;
         private VlcVideoSize _pendingRebuildVideoSize;
         private long _pendingRebuildMediaRequestId;
+        private bool _hasPendingVideoLayoutUpdate;
+        private VlcVideoSize _pendingVideoLayoutUpdate;
         private bool _resumeAfterInputLayerRecovery;
         private readonly Queue<PendingPlaybackRequest> _pendingPlaybackRequests =
             new Queue<PendingPlaybackRequest>();
         private VlcVideoSize CurrentVideoSize =>
-            new VlcVideoSize(_currentWidth, _currentHeight, _currentVisibleWidth, _currentVisibleHeight);
+            new VlcVideoSize(
+                _currentWidth,
+                _currentHeight,
+                _currentVisibleWidth,
+                _currentVisibleHeight,
+                _currentSarNum,
+                _currentSarDen,
+                _currentMediaRequestId,
+                _boundVideoLayoutToken);
 
         public bool IsChromaKeyColorExtractionReady =>
             _chromaKeySettings.Enabled
@@ -145,7 +159,8 @@ namespace XRVLC.Media
 
             return $"videoReady={videoScreen.IsHardwareSurfaceReady()}, videoSurface={videoScreen.GetHardwareSurfaceHandle()}, " +
                    $"subtitleReady={videoScreen.IsFlatSubtitleSurfaceReady()}, subtitleSurface={videoScreen.GetFlatSubtitleSurfaceHandle()}, " +
-                   $"videoBound={_videoSurfaceBoundToVlc}, subtitleBound={_subtitleSurfaceBoundToVlc}";
+                   $"videoBound={_videoSurfaceBoundToVlc}, subtitleBound={_subtitleSurfaceBoundToVlc}, " +
+                   $"mediaRequest={_currentMediaRequestId}, layoutToken={_boundVideoLayoutToken}";
         }
 
         private static string RedactForLog(string uri)
@@ -322,6 +337,7 @@ namespace XRVLC.Media
             }
 
             _activeMediaRequestId = request.MediaRequestId;
+            _currentMediaRequestId = request.MediaRequestId;
             CurrentMedia = request.Media;
             ApplyVideoRotation(0);
             CurrentMedia.DurationMs = Math.Max(0L, result.duration);
@@ -335,6 +351,7 @@ namespace XRVLC.Media
             _pendingChangeLayer = false;
             _hasPendingRebuildLayer = false;
             _pendingRebuildMediaRequestId = 0L;
+            _hasPendingVideoLayoutUpdate = false;
             _resumeAfterInputLayerRecovery = false;
             _fisheyeProjectionFormula = FisheyeProjectionFormula.Equidistant;
             _chromaKeySettings = ChromaKeySettings.Default;
@@ -368,13 +385,15 @@ namespace XRVLC.Media
 
         /// <summary>
         /// 由 onNewVideoLayout 触发，用于解码器实际输出与静态解析不一致时的二次矫正。
-        /// 此时 CurrentMedia.Projection 已由 HandleMediaParseFinished 更新，SetGeometry 结果一致。
+        /// Surface 生命周期只由媒体切换和用户显式几何设置控制；尺寸回调仅原地更新映射和显示比例。
         /// </summary>
         private void OnVideoSizeChanged(VlcVideoSize videoSize)
         {
             SurfaceDebug(
                 $"layout_callback received valid={videoSize.IsValid} raw={videoSize.Width}x{videoSize.Height} " +
                 $"visible={videoSize.VisibleWidth}x{videoSize.VisibleHeight} content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
+                $"sar={videoSize.SarNum}/{videoSize.SarDen} request={videoSize.MediaRequestId} " +
+                $"surfaceToken={videoSize.SurfaceToken} " +
                 $"state={FormatSurfaceState()}");
 
             if (!videoSize.IsValid)
@@ -383,29 +402,70 @@ namespace XRVLC.Media
                 return;
             }
 
-            if (_activeMediaRequestId != 0L || _pendingPlaybackRequests.Count > 0)
+            if (videoSize.MediaRequestId <= 0L || videoSize.SurfaceToken <= 0L)
             {
                 SurfaceDebug(
-                    $"layout_callback ignored queued_request active={_activeMediaRequestId} " +
-                    $"queued={_pendingPlaybackRequests.Count}");
+                    $"layout_callback ignored unscoped request={videoSize.MediaRequestId} " +
+                    $"surfaceToken={videoSize.SurfaceToken}");
                 return;
             }
 
-            videoSize = NormalizeCodecAlignedPadding(videoSize);
+            if (videoSize.MediaRequestId != _currentMediaRequestId)
+            {
+                SurfaceDebug(
+                    $"layout_callback ignored stale_request callback={videoSize.MediaRequestId} " +
+                    $"current={_currentMediaRequestId}");
+                return;
+            }
+
+            if (_geometryBindingCoroutine != null || _activeVideoOutputSwitchToken != 0L)
+            {
+                bool matchesActiveToken = videoSize.SurfaceToken == _activeVideoOutputSwitchToken;
+                bool matchesBoundToken = _boundVideoLayoutToken > 0L
+                    && videoSize.SurfaceToken == _boundVideoLayoutToken;
+                if (!matchesActiveToken && !matchesBoundToken)
+                {
+                    SurfaceDebug(
+                        $"layout_callback ignored stale_surface_during_transaction callback={videoSize.SurfaceToken} " +
+                        $"active={_activeVideoOutputSwitchToken} bound={_boundVideoLayoutToken}");
+                    return;
+                }
+
+                _pendingVideoLayoutUpdate = videoSize;
+                _hasPendingVideoLayoutUpdate = true;
+                SurfaceDebug(
+                    $"layout_callback deferred transaction_active callbackToken={videoSize.SurfaceToken} " +
+                    $"active={_activeVideoOutputSwitchToken} bound={_boundVideoLayoutToken}");
+                return;
+            }
+
+            if (!_videoSurfaceBoundToVlc || !_boundInputLayerSpec.HasValue)
+            {
+                SurfaceDebug("layout_callback ignored surface_not_bound");
+                return;
+            }
+
+            if (videoSize.SurfaceToken != _boundVideoLayoutToken)
+            {
+                SurfaceDebug(
+                    $"layout_callback ignored stale_surface callback={videoSize.SurfaceToken} " +
+                    $"bound={_boundVideoLayoutToken}");
+                return;
+            }
+
+            ApplyVideoLayoutWithoutSurfaceRebuild(videoSize, "callback");
+        }
+
+        private void ApplyVideoLayoutWithoutSurfaceRebuild(VlcVideoSize reportedSize, string reason)
+        {
+            VlcVideoSize videoSize = NormalizeCodecAlignedPadding(reportedSize);
             VlcVideoSize previousSize = CurrentVideoSize;
-            VideoGeometrySelection nextGeometry = ResolveRequestedGeometry();
-            VideoLayerSpec nextVideoSpec = CreateVideoLayerSpec(videoSize, nextGeometry);
             bool contentUnchanged = previousSize.IsValid && HasSameContentDimensions(previousSize, videoSize);
-            bool geometryUnchanged = HasSameGeometry(_currentGeometrySelection, nextGeometry);
-            bool surfaceAlreadyCurrent = _geometryBindingCoroutine != null || IsVideoLayerCurrent(nextVideoSpec);
-            SurfaceDebug(
-                $"layout_callback decision contentUnchanged={contentUnchanged} geometryUnchanged={geometryUnchanged} " +
-                $"surfaceAlreadyCurrent={surfaceAlreadyCurrent} coroutineActive={_geometryBindingCoroutine != null} " +
-                $"nextProjection={nextGeometry.Projection} nextStereo={nextGeometry.Stereo} state={FormatSurfaceState()}");
+            bool sarUnchanged = previousSize.IsValid && HasSamePixelAspectRatio(previousSize, videoSize);
 
             SetCurrentVideoSize(videoSize);
 
-            if (contentUnchanged && geometryUnchanged && surfaceAlreadyCurrent)
+            if (contentUnchanged && sarUnchanged)
             {
                 if (!previousSize.HasSameDimensions(videoSize))
                 {
@@ -413,13 +473,32 @@ namespace XRVLC.Media
                         $"[PlaybackService] OnVideoSizeChanged ignored raw layout padding change: " +
                         $"raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
                 }
-                SurfaceDebug("layout_callback ignored already_current");
+                SurfaceDebug($"layout_callback ignored already_current reason={reason}");
                 return;
             }
 
-            Debug.Log($"[PlaybackService] OnVideoSizeChanged (矫正): raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}");
-            SurfaceDebug("layout_callback accepted before_rebuild");
-            RequestRebuildLayer(videoSize);
+            VideoLayerSpec layoutSpec = CreateVideoLayerSpec(videoSize, _currentGeometrySelection);
+            VlcPlaybackBridge.SetVideoSurfaceMapping(
+                layoutSpec.Mapper.FisheyeMappingEnabled,
+                layoutSpec.Mapper.ChromaKeyEnabled,
+                layoutSpec.Mapper.Stereo,
+                layoutSpec.Mapper.ContentWidth,
+                layoutSpec.Mapper.ContentHeight);
+            videoScreen?.FitVideoSize((uint)videoSize.DisplayWidth, (uint)videoSize.DisplayHeight);
+
+            // Input SurfaceTexture can change its default buffer size in place. The PXR output
+            // Surface remains allocated at its original size, so only commit the in-place state.
+            _boundInputLayerSpec = layoutSpec.Input;
+            _boundMapperSpec = layoutSpec.Mapper;
+
+            Debug.Log(
+                $"[PlaybackService] OnVideoSizeChanged applied in place: " +
+                $"raw={videoSize.Width}x{videoSize.Height}, content={videoSize.ContentWidth}x{videoSize.ContentHeight}, " +
+                $"sar={videoSize.SarNum}/{videoSize.SarDen}");
+            SurfaceDebug(
+                $"layout_callback applied_in_place reason={reason} request={videoSize.MediaRequestId} " +
+                $"surfaceToken={videoSize.SurfaceToken} content={videoSize.ContentWidth}x{videoSize.ContentHeight} " +
+                $"display={videoSize.DisplayWidth}x{videoSize.DisplayHeight} surfaceRebuild=false");
         }
 
         private void RequestRebuildLayer(VlcVideoSize videoSize, long mediaRequestId = 0L)
@@ -575,6 +654,8 @@ namespace XRVLC.Media
             {
                 CommitLayerSpec(layerSpec);
                 _videoSurfaceBoundToVlc = true;
+                if (rebuildInput)
+                    _boundVideoLayoutToken = token;
                 _activeVideoOutputSwitchToken = 0L;
                 _videoOutputSwitchState = VideoOutputSwitchState.None;
                 _videoOutputSwitchFailureReason = null;
@@ -826,6 +907,7 @@ namespace XRVLC.Media
             _boundMapperSpec = null;
             _boundOutputLayerSpec = outputMatchesTarget ? target.Output : (OutputLayerSpec?)null;
             _videoSurfaceBoundToVlc = false;
+            _boundVideoLayoutToken = 0L;
             _geometryBindingCoroutine = null;
             if (mediaRequestId == 0L && resumeCurrentMedia)
                 _resumeAfterInputLayerRecovery = true;
@@ -844,8 +926,13 @@ namespace XRVLC.Media
             }
             _resumeAfterInputLayerRecovery = false;
             _geometryBindingCoroutine = null;
+            TryApplyPendingVideoLayoutUpdate(reason);
             if (mediaRequestId > 0L && reason != "ready")
+            {
                 VlcPlaybackBridge.CancelPendingMediaRequest(mediaRequestId);
+                if (_currentMediaRequestId == mediaRequestId)
+                    _currentMediaRequestId = 0L;
+            }
             CompleteActivePlaybackRequest(mediaRequestId, reason);
             StartNextParsedPlaybackRequest();
             if (_geometryBindingCoroutine != null || _activeMediaRequestId != 0L)
@@ -866,6 +953,29 @@ namespace XRVLC.Media
                 _pendingChangeLayer = false;
                 RequestChangeLayer();
             }
+        }
+
+        private void TryApplyPendingVideoLayoutUpdate(string transactionReason)
+        {
+            if (!_hasPendingVideoLayoutUpdate)
+                return;
+
+            VlcVideoSize pendingSize = _pendingVideoLayoutUpdate;
+            _hasPendingVideoLayoutUpdate = false;
+            _pendingVideoLayoutUpdate = default(VlcVideoSize);
+            bool transactionReady = transactionReason == "ready" || transactionReason == "change-ready";
+            if (!transactionReady)
+            {
+                SurfaceDebug(
+                    $"layout_callback discarded_after_transaction reason={transactionReason} " +
+                    $"request={pendingSize.MediaRequestId} surfaceToken={pendingSize.SurfaceToken}");
+                return;
+            }
+
+            SurfaceDebug(
+                $"layout_callback resume_after_transaction request={pendingSize.MediaRequestId} " +
+                $"surfaceToken={pendingSize.SurfaceToken}");
+            OnVideoSizeChanged(pendingSize);
         }
 
         private IEnumerator WaitForVideoOutputSwitch(
@@ -985,6 +1095,8 @@ namespace XRVLC.Media
             _currentHeight = videoSize.Height;
             _currentVisibleWidth = videoSize.VisibleWidth;
             _currentVisibleHeight = videoSize.VisibleHeight;
+            _currentSarNum = videoSize.SarNum;
+            _currentSarDen = videoSize.SarDen;
         }
 
         private VideoGeometrySelection? GetManualGeometryOverride()
@@ -1069,6 +1181,11 @@ namespace XRVLC.Media
             _currentHeight = 0;
             _currentVisibleWidth = 0;
             _currentVisibleHeight = 0;
+            _currentSarNum = 1;
+            _currentSarDen = 1;
+            _currentMediaRequestId = 0L;
+            _boundVideoLayoutToken = 0L;
+            _hasPendingVideoLayoutUpdate = false;
             _isShortcutFastRate = false;
             VlcPlaybackBridge.PublishPlaybackRate(1f);
             
@@ -1093,6 +1210,11 @@ namespace XRVLC.Media
             _currentHeight = 0;
             _currentVisibleWidth = 0;
             _currentVisibleHeight = 0;
+            _currentSarNum = 1;
+            _currentSarDen = 1;
+            _currentMediaRequestId = 0L;
+            _boundVideoLayoutToken = 0L;
+            _hasPendingVideoLayoutUpdate = false;
             _pendingChangeLayer = false;
             _hasPendingRebuildLayer = false;
             _pendingRebuildMediaRequestId = 0L;
@@ -1350,7 +1472,7 @@ namespace XRVLC.Media
         private void ApplyLayerGeometryWithoutRebuild(VideoProjection projection, StereoMode stereo, FlatVideoCurveMode curveMode)
         {
             videoScreen.ChangeLayer(projection, stereo, curveMode);
-            videoScreen.FitVideoSize((uint)CurrentVideoSize.ContentWidth, (uint)CurrentVideoSize.ContentHeight);
+            videoScreen.FitVideoSize((uint)CurrentVideoSize.DisplayWidth, (uint)CurrentVideoSize.DisplayHeight);
             _currentGeometrySelection = new VideoGeometrySelection(
                 projection,
                 stereo,
@@ -1752,19 +1874,6 @@ namespace XRVLC.Media
             surfaceHeight = Math.Max(1u, (uint)Math.Round(contentHeight * scale));
         }
 
-        private bool IsVideoLayerCurrent(VideoLayerSpec spec)
-        {
-            return videoScreen != null
-                && videoScreen.IsHardwareSurfaceReady()
-                && _videoSurfaceBoundToVlc
-                && _boundInputLayerSpec.HasValue
-                && _boundMapperSpec.HasValue
-                && _boundOutputLayerSpec.HasValue
-                && _boundInputLayerSpec.Value.Equals(spec.Input)
-                && _boundMapperSpec.Value.Equals(spec.Mapper)
-                && _boundOutputLayerSpec.Value.Equals(spec.Output);
-        }
-
         private bool IsSubtitleSurfaceCurrent(SubtitleSurfaceSpec spec)
         {
             return videoScreen != null
@@ -1801,6 +1910,11 @@ namespace XRVLC.Media
                 && a.ContentHeight == b.ContentHeight;
         }
 
+        private static bool HasSamePixelAspectRatio(VlcVideoSize a, VlcVideoSize b)
+        {
+            return (long)a.SarNum * b.SarDen == (long)b.SarNum * a.SarDen;
+        }
+
         private VlcVideoSize NormalizeCodecAlignedPadding(VlcVideoSize reportedSize)
         {
             if (!_videoSurfaceBoundToVlc || !_boundInputLayerSpec.HasValue)
@@ -1809,38 +1923,32 @@ namespace XRVLC.Media
             InputLayerSpec boundInput = _boundInputLayerSpec.Value;
             int trustedWidth = (int)boundInput.ContentWidth;
             int trustedHeight = (int)boundInput.ContentHeight;
-            bool reportedVisibleEqualsRaw = reportedSize.VisibleWidth == reportedSize.Width
-                && reportedSize.VisibleHeight == reportedSize.Height;
-            bool matchesAlignedBuffer = reportedSize.Width == AlignUp(trustedWidth, CodecBufferAlignmentPixels)
-                && reportedSize.Height == AlignUp(trustedHeight, CodecBufferAlignmentPixels);
-            bool differsFromTrustedContent = reportedSize.ContentWidth != trustedWidth
-                || reportedSize.ContentHeight != trustedHeight;
+            bool noReliableVisibleCrop = (reportedSize.VisibleWidth <= 0 || reportedSize.VisibleWidth == reportedSize.Width)
+                && (reportedSize.VisibleHeight <= 0 || reportedSize.VisibleHeight == reportedSize.Height);
+            int widthPadding = reportedSize.Width - trustedWidth;
+            int heightPadding = reportedSize.Height - trustedHeight;
+            bool matchesLikelyCodecPadding = widthPadding >= 0
+                && heightPadding >= 0
+                && widthPadding <= MaxCodecPaddingPixels
+                && heightPadding <= MaxCodecPaddingPixels
+                && (widthPadding > 0 || heightPadding > 0);
 
-            if (!reportedVisibleEqualsRaw || !matchesAlignedBuffer || !differsFromTrustedContent)
+            if (!noReliableVisibleCrop || !matchesLikelyCodecPadding)
                 return reportedSize;
 
             SurfaceDebug(
                 $"layout_callback normalized codec_padding raw={reportedSize.Width}x{reportedSize.Height} " +
                 $"reportedVisible={reportedSize.VisibleWidth}x{reportedSize.VisibleHeight} " +
-                $"trustedVisible={trustedWidth}x{trustedHeight} alignment={CodecBufferAlignmentPixels}");
+                $"trustedVisible={trustedWidth}x{trustedHeight} maxPadding={MaxCodecPaddingPixels}");
             return new VlcVideoSize(
                 reportedSize.Width,
                 reportedSize.Height,
                 trustedWidth,
-                trustedHeight);
-        }
-
-        private static int AlignUp(int value, int alignment)
-        {
-            return (value + alignment - 1) / alignment * alignment;
-        }
-
-        private static bool HasSameGeometry(VideoGeometrySelection a, VideoGeometrySelection b)
-        {
-            return a.Projection == b.Projection
-                && a.Stereo == b.Stereo
-                && a.CurveMode == b.CurveMode
-                && a.FisheyeProjectionFormula == b.FisheyeProjectionFormula;
+                trustedHeight,
+                reportedSize.SarNum,
+                reportedSize.SarDen,
+                reportedSize.MediaRequestId,
+                reportedSize.SurfaceToken);
         }
 
         private static bool UsesFlatSubtitleSurfaceMode(SubtitleRenderMode mode)
@@ -1892,6 +2000,7 @@ namespace XRVLC.Media
             _boundInputLayerSpec = null;
             _boundMapperSpec = null;
             _boundOutputLayerSpec = null;
+            _boundVideoLayoutToken = 0L;
         }
 
         public void SetRenderSubtitlesOutsideScreen(bool enabled)

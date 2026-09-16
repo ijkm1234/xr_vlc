@@ -47,7 +47,7 @@ namespace XRVLC
             _videoScreen.RebuildLayer(_hardwareDecodingProvider?.Invoke() ?? true, contentWidth, contentHeight, geometry.Projection, geometry.Stereo, geometry.CurveMode, useTextureAlphaBlending);
             _videoScreen.ChangeLayer(geometry.Projection, geometry.Stereo, geometry.CurveMode);
             // Seed the new media size before SetVideoLayout refits cached dimensions.
-            _videoScreen.FitVideoSize(contentWidth, contentHeight);
+            _videoScreen.FitVideoSize((uint)videoSize.DisplayWidth, (uint)videoSize.DisplayHeight);
             _videoScreen.SetVideoLayout(
                 _scaleModeProvider?.Invoke() ?? VideoScaleMode.Fit,
                 _aspectRatioProvider?.Invoke() ?? VideoAspectRatio.Source);
